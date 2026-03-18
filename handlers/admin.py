@@ -502,7 +502,7 @@ async def admin_close(callback: types.CallbackQuery):
 async def cmd_cancel(message: types.Message, state: FSMContext):
     """Отмена текущего действия."""
     await state.clear()
-    await message.answer(
+    await message.answer(a
         "❌ Отменено.\n\nВыберите действие:",
         reply_markup=get_admin_keyboard() if is_admin(message.from_user.id) else get_main_menu_keyboard(),
     )

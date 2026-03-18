@@ -22,7 +22,8 @@ class User(Base):
         username: Имя пользователя в Telegram.
         marzban_username: Уникальное имя пользователя в Marzban.
         is_trial_used: Был ли использован пробный период.
-        balance: Баланс от реферальной программы (в рублях).
+        balance: Основной баланс для покупки VPN (в рублях).
+        referral_balance: Баланс от реферальной программы (в рублях).
         referrer_id: ID реферера, который пригласил пользователя.
         expire_date: Дата истечения подписки.
         last_notified_step: Последний отправленный интервал уведомления.
@@ -36,6 +37,7 @@ class User(Base):
     marzban_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
     is_trial_used: Mapped[bool] = mapped_column(Boolean, default=False)
     balance: Mapped[float] = mapped_column(Float, default=0.0)
+    referral_balance: Mapped[float] = mapped_column(Float, default=0.0)
     referrer_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.user_id"), nullable=True)
     expire_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_notified_step: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

@@ -40,6 +40,7 @@ from handlers.trial import router as trial_router
 from handlers.buy import router as buy_router
 from handlers.help import router as help_router
 from handlers.admin import router as admin_router
+from handlers.referrals import router as referrals_router
 
 
 # Настройка логгирования
@@ -90,6 +91,7 @@ dp.include_router(trial_router)
 dp.include_router(buy_router)
 dp.include_router(help_router)
 dp.include_router(admin_router)
+dp.include_router(referrals_router)
 
 
 @dp.message(Command("ping"))
@@ -115,6 +117,7 @@ async def cmd_me(message: Message):
                 f"Username: @{user.username or 'N/A'}\n"
                 f"Marzban: <code>{user.marzban_username or 'N/A'}</code>\n"
                 f"Баланс: {user.balance:.2f}₽\n"
+                f"Реф. баланс: {user.referral_balance:.2f}₽\n"
                 f"Триал: {'Использован' if user.is_trial_used else 'Доступен'}\n"
             )
             
