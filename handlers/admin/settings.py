@@ -28,6 +28,7 @@ def get_settings_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💰 Тарифы подписки", callback_data="settings_tariffs")],
         [InlineKeyboardButton(text="👥 Реферальная система", callback_data="settings_referral")],
         [InlineKeyboardButton(text="🎁 Бесплатный триал", callback_data="settings_trial")],
+        [InlineKeyboardButton(text="🎨 Скидки на тарифы", callback_data="settings_discounts")],
         [InlineKeyboardButton(text="🔧 Управление пользователями", callback_data="settings_users")],
         [InlineKeyboardButton(text="Назад ↩️", callback_data="admin_panel")]
     ])
@@ -66,6 +67,16 @@ def get_users_management_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура управления пользователями."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Найти пользователя", callback_data="admin_find_by_id")],
+        [InlineKeyboardButton(text="Назад ↩️", callback_data="admin_panel")]
+    ])
+
+
+def get_discounts_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура настройки скидок."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="3 месяца", callback_data="discount_3month")],
+        [InlineKeyboardButton(text="6 месяцев", callback_data="discount_6month")],
+        [InlineKeyboardButton(text="12 месяцев", callback_data="discount_12month")],
         [InlineKeyboardButton(text="Назад ↩️", callback_data="settings")]
     ])
 
@@ -147,7 +158,7 @@ async def settings_referral(callback: CallbackQuery, session: AsyncSession):
 
 
 @router.callback_query(F.data == "settings_trial")
-async def settings_trial(callback: CallbackQuery, session: AsyncSession):
+async def settings_trial(callback: types.CallbackQuery, session: AsyncSession):
     """Настройки триала."""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
@@ -164,6 +175,48 @@ async def settings_trial(callback: CallbackQuery, session: AsyncSession):
     )
     
     await callback.message.edit_text(text, reply_markup=get_trial_keyboard(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings_discounts")
+async def settings_discounts(callback: types.CallbackQuery, session: AsyncSession):
+    """Настройки скидок."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    discount_3month = await get_db_setting(session, "discount_3month", "10")
+    discount_6month = await get_db_setting(session, "discount_6month", "17")
+    discount_12month = await get_db_setting(session, "discount_12month", "25")
+    
+    text = (
+        f"🎨 <b>Скидки на тарифы</b>\n\n"
+        f"<b>На 3 месяца:</b> {discount_3month}%\n"
+        f"<b>На 6 месяцев:</b> {discount_6month}%\n"
+        f"<b>На 12 месяцев:</b> {discount_12month}%\n\n"
+        f"Выберите параметр для изменения:"
+    )
+    
+    await callback.message.edit_text(text, reply_markup=get_discounts_keyboard(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings_users")
+async def settings_users(callback: types.CallbackQuery):
+    """Управление пользователями."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    text = (
+        f"🔧 <b>Управление пользователями</b>\n\n"
+        f"Найдите пользователя по Telegram ID для:\n"
+        f"• Продления подписки\n"
+        f"• Сброса триала\n"
+        f"• Изменения баланса"
+    )
+    
+    await callback.message.edit_text(text, reply_markup=get_users_management_keyboard(), parse_mode="HTML")
     await callback.answer()
 
 
@@ -188,7 +241,7 @@ async def settings_users(callback: CallbackQuery):
 
 @router.callback_query(F.data == "tariff_price")
 @router.callback_query(F.data == "tariff_duration")
-async def edit_tariff(callback: CallbackQuery, state: FSMContext):
+async def edit_tariff(callback: types.CallbackQuery, state: FSMContext):
     """Редактирование тарифа."""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
@@ -202,6 +255,72 @@ async def edit_tariff(callback: CallbackQuery, state: FSMContext):
         text = "💰 Введите новую цену подписки (в рублях):"
     else:
         text = "📅 Введите новый срок подписки (в днях):"
+    
+    await callback.message.answer(text)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "referral_level1")
+@router.callback_query(F.data == "referral_level2")
+@router.callback_query(F.data == "referral_level3")
+@router.callback_query(F.data == "referral_min_withdraw")
+async def edit_referral(callback: types.CallbackQuery, state: FSMContext):
+    """Редактирование реферальной системы."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    action = callback.data.split("_")[1]
+    await state.set_state(AdminSettings.waiting_for_referral_value)
+    await state.update_data(referral_type=action)
+    
+    if action == "min_withdraw":
+        text = "💸 Введите новую минимальную сумму вывода (в рублях):"
+    else:
+        level_num = action.replace("level", "")
+        text = f"📊 Введите новый процент для уровня {level_num} (0-100):"
+    
+    await callback.message.answer(text)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "trial_hours")
+@router.callback_query(F.data == "trial_data_limit")
+async def edit_trial(callback: types.CallbackQuery, state: FSMContext):
+    """Редактирование триала."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    action = callback.data.split("_")[1]
+    await state.set_state(AdminSettings.waiting_for_trial_value)
+    await state.update_data(trial_type=action)
+    
+    text = "⏰ Введите новый срок действия триала (в часах):" if action == "hours" else "📦 Введите новый лимит трафика для триала (в GB):"
+    
+    await callback.message.answer(text)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "discount_3month")
+@router.callback_query(F.data == "discount_6month")
+@router.callback_query(F.data == "discount_12month")
+async def edit_discount(callback: types.CallbackQuery, state: FSMContext):
+    """Редактирование скидок."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    action = callback.data.split("_")[1]
+    await state.set_state(AdminSettings.waiting_for_discount_value)
+    await state.update_data(discount_type=action)
+    
+    months_map = {
+        "3month": "3 месяца",
+        "6month": "6 месяцев",
+        "12month": "12 месяцев"
+    }
+    text = f"🎨 Введите новую скидку на {months_map.get(action, action)} (в процентах, 0-100):"
     
     await callback.message.answer(text)
     await callback.answer()
@@ -257,24 +376,60 @@ async def process_tariff_value(message: types.Message, state: FSMContext, sessio
     
     try:
         value = int(message.text.strip())
-        data = await state.get_data()
-        tariff_type = data.get("tariff_type")
         
         if value <= 0:
             await message.answer("❌ Значение должно быть положительным числом.")
             return
         
+        data = await state.get_data()
+        tariff_type = data.get("tariff_type")
+        
         if tariff_type == "price":
             key = "subscription_price"
             desc = "Цена подписки в рублях"
             await update_db_setting(session, key, str(value), desc)
-            await message.answer(f"✅ Цена подписки изменена на {value}₽")
+            await message.answer(
+                f"✅ Цена подписки изменена на {value}₽\n\n"
+                f"🔄 Цены всех тарифов автоматически пересчитаны с учетом скидок."
+            )
         else:
             key = "subscription_duration"
             desc = "Базовый срок подписки в днях"
             await update_db_setting(session, key, str(value), desc)
             await message.answer(f"✅ Срок подписки изменен на {value} дней")
         
+        await state.clear()
+        
+    except ValueError:
+        await message.answer("❌ Пожалуйста, введите корректное число.")
+
+
+@router.message(AdminSettings.waiting_for_discount_value)
+async def process_discount_value(message: types.Message, state: FSMContext, session: AsyncSession):
+    """Обработка нового значения скидки."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        value = int(message.text.strip())
+        
+        if value < 0 or value > 100:
+            await message.answer("❌ Скидка должна быть от 0 до 100%.")
+            return
+        
+        data = await state.get_data()
+        discount_type = data.get("discount_type")
+        
+        months_map = {
+            "3month": "3 месяца",
+            "6month": "6 месяцев",
+            "12month": "12 месяцев"
+        }
+        key = f"discount_{discount_type}"
+        desc = f"Скидка на {months_map.get(discount_type, discount_type)} (в процентах)"
+        
+        await update_db_setting(session, key, str(value), desc)
+        await message.answer(f"✅ Скидка на {months_map.get(discount_type, discount_type)} изменена на {value}%")
         await state.clear()
         
     except ValueError:

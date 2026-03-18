@@ -25,6 +25,7 @@ class AdminSettings(StatesGroup):
     waiting_for_tariff_value = State()
     waiting_for_referral_value = State()
     waiting_for_trial_value = State()
+    waiting_for_discount_value = State()
 
 
 class Support(StatesGroup):

@@ -134,6 +134,10 @@ async def init_default_settings(session: AsyncSession) -> None:
         "referral_level2": ("10", "Процент рефералов уровня 2"),
         "referral_level3": ("5", "Процент рефералов уровня 3"),
         "referral_min_withdraw": ("1000", "Минимальная сумма вывода в рублях"),
+        # Скидки для разных сроков подписки (в процентах)
+        "discount_3month": ("10", "Скидка на 3 месяца (в процентах)"),
+        "discount_6month": ("17", "Скидка на 6 месяцев (в процентах)"),
+        "discount_12month": ("25", "Скидка на 12 месяцев (в процентах)"),
     }
     
     for key, (value, desc) in defaults.items():
@@ -142,6 +146,21 @@ async def init_default_settings(session: AsyncSession) -> None:
             session.add(BotSettings(key=key, value=value, description=desc))
     
     await session.commit()
+
+
+async def calculate_tariff_price(session: AsyncSession, base_price: float, months: int) -> float:
+    """Рассчитать цену с учетом скидки для указанного срока."""
+    from database.models import BotSettings
+    
+    discount_key = f"discount_{months}month" if months >= 3 else None
+    if not discount_key:
+        return base_price * months
+    
+    discount_percent = await get_db_setting(session, discount_key, "0")
+    discount = float(discount_percent) / 100
+    final_price = base_price * months * (1 - discount)
+    
+    return round(final_price, 2)
 
 
 from database.models import BotSettings

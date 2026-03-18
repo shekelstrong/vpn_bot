@@ -19,16 +19,16 @@ from keyboards.inline import (
 )
 from services.marzban_api import marzban_service
 from services.payment_crypto import crypto_bot_service
-from config import settings
+from config import settings, get_db_setting, calculate_tariff_price
 
 router = Router()
 
-# Тарифы
-SUBSCRIPTION_TARIFFS = {
-    "1month": {"days": 30, "price": 100},
-    "3month": {"days": 90, "price": 270},
-    "6month": {"days": 180, "price": 500},
-    "12month": {"days": 365, "price": 900},
+# Тарифы (дни)
+SUBSCRIPTION_PERIODS = {
+    "1month": {"days": 30, "months": 1},
+    "3month": {"days": 90, "months": 3},
+    "6month": {"days": 180, "months": 6},
+    "12month": {"days": 365, "months": 12},
 }
 
 @router.callback_query(F.data == "buy")
@@ -41,66 +41,84 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
     if isinstance(callback_or_message, types.CallbackQuery):
         callback = callback_or_message
         message = callback.message
-        user_id = callback.from_user.id  # Берем ID пользователя, а не бота
+        user_id = callback.from_user.id
         await callback.answer()
     else:
         message = callback_or_message
         callback = None
         user_id = message.from_user.id
-
+    
+    # Получаем базовую цену из настроек
+    base_price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
+    base_price = float(base_price)
+    
     # Получаем пользователя
     result = await session.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
-
+    
     if not user:
         await message.answer("❌ Пользователь не найден. Нажмите /start")
         return
-
+    
     # Проверяем текущий статус подписки
     has_subscription = user.expire_date and user.expire_date > datetime.utcnow()
-
+    
     text = "🛒 <b>Магазин подписок Nemo VPN</b>\n\n"
     text += "Выберите срок подписки:\n\n"
-
+    
     if has_subscription:
         days_left = (user.expire_date - datetime.utcnow()).days
         text += f"✅ <b>Ваша подписка активна ещё {days_left} дн.</b>\n"
         text += "Новая подписка продлит текущую.\n\n"
-
-    for key, tariff in SUBSCRIPTION_TARIFFS.items():
-        discount = ""
-        if key != "1month":
-            original_price = (tariff["days"] / 30) * 100
-            discount = f" (экономия {int(original_price - tariff['price'])}₽)"
-        text += f"▫️ {tariff['days']} дней — {tariff['price']}₽{discount}\n"
-
+    
+    # Рассчитываем цены с учетом скидок
+    for key, period in SUBSCRIPTION_PERIODS.items():
+        months = period["months"]
+        price = await calculate_tariff_price(session, base_price, months)
+        
+        # Рассчитываем экономию (если есть скидка)
+        discount_text = ""
+        if months > 1:
+            original_price = base_price * months
+            savings = round(original_price - price, 2)
+            discount_percent = round(savings / original_price * 100, 1)
+            discount_text = f" (экономия {savings}₽, {discount_percent}% скидка)"
+        
+        text += f"▫️ {period['days']} дней — {int(price)}₽{discount_text}\n"
+    
     await message.answer(
         text=text,
         reply_markup=get_subscription_duration_keyboard()
     )
 
 @router.callback_query(F.data.startswith("duration"))
-async def select_duration(callback: types.CallbackQuery, state: FSMContext):
+async def select_duration(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     """Выбор срока подписки."""
     duration = callback.data.replace("duration_", "")
-    tariff = SUBSCRIPTION_TARIFFS.get(duration)
-
-    if not tariff:
+    period = SUBSCRIPTION_PERIODS.get(duration)
+    
+    if not period:
         await callback.answer("❌ Неверный тариф", show_alert=True)
         return
-
+    
+    # Рассчитываем цену динамически
+    base_price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
+    base_price = float(base_price)
+    months = period["months"]
+    price = await calculate_tariff_price(session, base_price, months)
+    
     # Сохраняем выбранный тариф
     await state.update_data(
         duration=duration,
-        days=tariff["days"],
-        price=tariff["price"]
+        days=period["days"],
+        price=int(price)
     )
-
+    
     await callback.message.edit_text(
         text=(
             "✅ <b>Выбран тариф</b>\n\n"
-            f"⏱ Срок: {tariff['days']} дней\n"
-            f"💳 Цена: {tariff['price']}₽\n\n"
+            f"⏱ Срок: {period['days']} дней\n"
+            f"💳 Цена: {int(price)}₽\n\n"
             "Выберите способ оплаты:"
         ),
         reply_markup=get_buy_keyboard()
