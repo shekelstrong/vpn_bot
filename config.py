@@ -13,10 +13,14 @@ class Settings(BaseSettings):
     MARZBAN_ADMIN_USERNAME: str = Field(..., description="Логин администратора Marzban")
     MARZBAN_ADMIN_PASSWORD: str = Field(..., description="Пароль администратора Marzban")
 
-    # Database (Изменено на SQLite для локального тестирования)
+    # Database
     DATABASE_URL: str = Field(
         default="sqlite+aiosqlite:///vpn_bot.db",
-        description="URL подключения к SQLite базе данных"
+        description="URL подключения к базе данных"
+    )
+    POSTGRES_PASSWORD: str = Field(
+        default="", 
+        description="Пароль от PostgreSQL (нужен для Docker)"
     )
 
     # CryptoBot
@@ -55,6 +59,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore" # Добавлено правило игнорировать любые другие переменные из .env, чтобы бот больше не падал из-за них
 
     @property
     def admin_ids_list(self) -> List[int]:
