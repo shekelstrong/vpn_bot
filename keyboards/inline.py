@@ -167,7 +167,7 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="Статистика 📊", callback_data="admin_stats", style="primary")
     builder.button(text="Пользователи 👥", callback_data="admin_users", style="primary")
     builder.button(text="Рассылка 📢", callback_data="admin_broadcast", style="primary")
-    builder.button(text="Настройки ⚙️", callback_data="admin_settings", style="primary")
+    builder.button(text="Настройки ⚙️", callback_data="settings", style="primary")
     builder.button(text="Закрыть панель 🔒", callback_data="admin_close", style="danger")
     
     builder.adjust(2, 2, 1)

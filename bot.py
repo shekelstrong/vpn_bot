@@ -24,7 +24,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import Message, BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, MenuButtonCommands
+from aiogram.types import Message, BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeChat, MenuButtonCommands
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -168,7 +168,7 @@ async def on_startup():
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
     logger.info("Кнопка меню установлена")
 
-    # Установка команд (для всех пользователей)
+    # Установка команд для всех пользователей (без команды admin)
     base_commands = [
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="me", description="Мой профиль"),
@@ -178,9 +178,20 @@ async def on_startup():
         BotCommand(command="help", description="Помощь"),
     ]
     
-    # Сначала устанавливаем базовые команды для всех пользователей
-    await bot.set_my_commands(base_commands, scope=BotCommandScopeDefault())
+    await bot.set_my_commands(base_commands, scope=BotCommandScopeAllPrivateChats())
     logger.info("Общие команды установлены")
+    
+    # Установка команды admin только для администраторов
+    admin_commands = [
+        BotCommand(command="admin", description="Админ-панель"),
+    ]
+    
+    for admin_id in settings.admin_ids_list:
+        await bot.set_my_commands(
+            base_commands + admin_commands,
+            scope=BotCommandScopeChat(chat_id=admin_id)
+        )
+    logger.info("Админские команды установлены")
 
 
 async def on_shutdown():
