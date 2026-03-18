@@ -105,16 +105,19 @@ def get_trial_keyboard() -> InlineKeyboardMarkup:
 
 def get_help_keyboard() -> InlineKeyboardMarkup:
     """
-    Клавиатура раздела помощи.
+    Клавиатура раздела помощи с юридическими документами.
     """
     builder = InlineKeyboardBuilder()
     
     builder.button(text="Как настроить Hiddify 📱", callback_data="help_hiddify")
     builder.button(text="Частые вопросы ❓", callback_data="help_faq")
     builder.button(text="Техподдержка 💬", callback_data="help_support")
+    builder.button(text="Политика конфиденциальности 📜", url="https://telegra.ph/Politika-konfidencialnosti-08-15-17")
+    builder.button(text="Пользовательское соглашение 📝", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-15-10")
     builder.button(text="Назад ↩️", callback_data="back_to_main")
     
-    builder.adjust(1, 1)
+    # adjust(1) выстроит все кнопки строго друг под другом (в 1 столбец)
+    builder.adjust(1)
     return builder.as_markup()
 
 
