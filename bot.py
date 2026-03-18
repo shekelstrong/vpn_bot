@@ -24,7 +24,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import Message, BotCommand, BotCommandScopeDefault
+from aiogram.types import Message, BotCommand, BotCommandScopeDefault, MenuButtonCommands
 from loguru import logger
 
 from config import settings, init_default_settings
@@ -159,7 +159,11 @@ async def on_startup():
     admin_count = len(settings.admin_ids_list)
     logger.info(f"Зарегистрировано администраторов: {admin_count}")
     
-    # Установка кнопки меню
+    # Установка кнопки меню слева от поля ввода
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    logger.info("Кнопка меню установлена")
+
+    # Установка команд
     commands = [
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="me", description="Мой профиль"),
@@ -170,7 +174,7 @@ async def on_startup():
         BotCommand(command="admin", description="Админ-панель"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-    logger.info("Кнопка меню настроена")
+    logger.info("Команды настроены")
     
     logger.info("=" * 50)
     logger.info("Nemo VPN Bot готов к работе!")
