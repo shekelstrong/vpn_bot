@@ -124,6 +124,8 @@ async def update_db_setting(session: AsyncSession, key: str, value: str, descrip
 
 async def init_default_settings(session: AsyncSession) -> None:
     """Инициализация дефолтных настроек в БД."""
+    from database.models import BotSettings
+    
     defaults = {
         "subscription_price": ("100", "Цена подписки в рублях"),
         "subscription_duration": ("30", "Базовый срок подписки в днях"),
