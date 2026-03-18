@@ -9,7 +9,7 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import List, Dict, Optional
 
-from utils.logger import logger
+from loguru import logger  # <--- ИСПРАВЛЕНО: используем loguru напрямую
 from config import settings
 
 
@@ -30,12 +30,6 @@ async def notify_admin_new_user(
 ):
     """
     Уведомление админам о новом пользователе.
-    
-    Args:
-        bot: Экземпляр бота
-        user_id: ID нового пользователя
-        username: Юзернейм
-        referrers_chain: Список словарей [{'level': 1, 'id': 123, 'username': 'abc'}, ...]
     """
     user_link = get_user_link(user_id, username)
     
@@ -71,9 +65,6 @@ async def notify_admin_payment(
 ):
     """
     Уведомление админам о пополнении/покупке.
-    
-    Args:
-        referrers_bonuses: [{'level': 1, 'id': 123, 'username': 'abc', 'bonus': 15.0}, ...]
     """
     user_link = get_user_link(user_id, username)
     
