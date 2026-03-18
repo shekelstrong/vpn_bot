@@ -6,24 +6,34 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 
-def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
+def get_main_reply_keyboard(show_trial: bool = True) -> ReplyKeyboardMarkup:
     """
     Главное меню с reply-кнопками.
     
     Кнопки:
         - Мой профиль 👤
-        - Купить подписку 📦
+        - Реферальная программа 👥
         - Подписка 📦
+        - Пробная подписка (только если show_trial=True)
+        - Купить подписку 📦
         - Помощь 🆘
+    
+    Args:
+        show_trial: Показывать ли кнопку пробной подписки
     """
     builder = ReplyKeyboardBuilder()
     
     builder.button(text="Мой профиль 👤")
-    builder.button(text="Купить подписку 📦")
+    builder.button(text="Реферальная программа 👥")
     builder.button(text="Подписка 📦")
+    
+    if show_trial:
+        builder.button(text="Пробная подписка 🎁")
+    
+    builder.button(text="Купить подписку 🛒")
     builder.button(text="Помощь 🆘")
     
-    builder.adjust(2, 2)
+    builder.adjust(2, 2, 2)
     return builder.as_markup(resize_keyboard=True, one_time_keyboard=False)
 
 

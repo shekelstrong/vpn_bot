@@ -130,13 +130,28 @@ class WebhookHandler:
             if not tg_user_id:
                 return web.json_response({"error": "User not found"}, status=404)
 
+            # Получаем количество дней из PaymentInvoice
+            days = 30
+            async with self.session_factory() as session:
+                result = await session.execute(
+                    select(PaymentInvoice).where(PaymentInvoice.invoice_id == payment_data.payment_id)
+                )
+                invoice = result.scalar_one_or_none()
+                if invoice and invoice.payload:
+                    try:
+                        import json
+                        payload = json.loads(invoice.payload)
+                        days = payload.get("days", 30)
+                    except:
+                        pass
+
             await self.process_payment(
                 tg_user_id=tg_user_id,
                 amount=payment_data.amount,
                 currency=payment_data.currency,
                 payment_method='platega',
                 payment_id=payment_data.payment_id,
-                days=30  # По умолчанию для карт, можно расширить логику
+                days=days
             )
 
             return web.json_response({"status": "ok"})
@@ -266,7 +281,7 @@ class WebhookHandler:
                     amount_rub=amount,
                     duration_days=days
                 )
-                
+
                 await notify_admin_payment(
                     bot=bot,
                     user_id=tg_user_id,
@@ -275,6 +290,22 @@ class WebhookHandler:
                     method=payment_method,
                     referrers_bonuses=referrers_bonuses if referrers_bonuses else None
                 )
+
+                # 8. Скрываем команду /trial у пользователя с активной подпиской
+                from aiogram.types import BotCommand, BotCommandScopeChat
+                base_commands = [
+                    BotCommand(command="start", description="Главное меню"),
+                    BotCommand(command="me", description="Мой профиль"),
+                    BotCommand(command="buy", description="Купить подписку"),
+                    BotCommand(command="sub", description="Подписка"),
+                    BotCommand(command="referral", description="Реферальная программа"),
+                    BotCommand(command="help", description="Помощь"),
+                ]
+                await bot.set_my_commands(
+                    base_commands,
+                    scope=BotCommandScopeChat(chat_id=tg_user_id)
+                )
+                logger.info(f"Команда /trial скрыта для пользователя {tg_user_id}")
 
             except Exception as e:
                 logger.error(f"Error in process_payment: {e}")

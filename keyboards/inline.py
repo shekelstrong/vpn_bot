@@ -7,26 +7,36 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import Optional, List
 
 
-def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+def get_main_menu_keyboard(show_trial: bool = True) -> InlineKeyboardMarkup:
     """
     Главное меню бота.
-    
+
     Кнопки:
-        - Мой профиль 👤
-        - Купить подписку 📦
-        - Подписка 📦
-        - Реферальная программа 👥
-        - Помощь 🆘
+        Row 1: Мой профиль 👤 | Реферальная программа 👥
+        Row 2: Подписка 📦 (green) | Пробная подписка 🎁 (green, если show_trial=True)
+        Row 3: Купить подписку 🛒 | Помощь 🆘 (red)
+
+    Args:
+        show_trial: Показывать ли кнопку пробной подписки
     """
     builder = InlineKeyboardBuilder()
-    
+
+    # Row 1: Синие кнопки
     builder.button(text="Мой профиль 👤", callback_data="profile", style="primary")
-    builder.button(text="Купить подписку 📦", callback_data="buy", style="primary")
-    builder.button(text="Подписка 📦", callback_data="sub", style="success")
     builder.button(text="Реферальная программа 👥", callback_data="referral", style="primary")
-    builder.button(text="Помощь 🆘", callback_data="help", style="primary")
     
-    builder.adjust(2, 2, 1)  # 2 кнопки в ряду, потом1
+    # Row 2: Зелёные кнопки
+    builder.button(text="Подписка 📦", callback_data="subscription", style="success")
+    if show_trial:
+        builder.button(text="Пробная подписка 🎁", callback_data="trial", style="success")
+        builder.adjust(2, 2, 2)  # 3 ряда по 2 кнопки
+    else:
+        builder.adjust(2, 1, 1)  # 2 ряда по 2, потом 1 кнопка
+
+    # Row 3: Синяя и красная кнопки
+    builder.button(text="Купить подписку 🛒", callback_data="buy", style="primary")
+    builder.button(text="Помощь 🆘", callback_data="help", style="danger")
+
     return builder.as_markup()
 
 

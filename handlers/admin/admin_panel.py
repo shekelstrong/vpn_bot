@@ -427,7 +427,6 @@ async def process_broadcast(message: types.Message, state: FSMContext):
         photo_file_id=photo_file_id,
         video_file_id=video_file_id,
         document_file_id=document_file_id,
-        parse_mode=message.parse_mode,
         reply_markup=None
     )
     
@@ -485,9 +484,9 @@ async def broadcast_confirm_send(callback: types.CallbackQuery, state: FSMContex
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
-    
+
     await callback.answer("⏳ Начинаю рассылку...")
-    
+
     # Получаем данные из состояния
     data = await state.get_data()
     message_type = data.get("message_type", "text")
@@ -495,15 +494,14 @@ async def broadcast_confirm_send(callback: types.CallbackQuery, state: FSMContex
     photo_file_id = data.get("photo_file_id")
     video_file_id = data.get("video_file_id")
     document_file_id = data.get("document_file_id")
-    parse_mode = data.get("parse_mode")
-    
+
     # Получаем всех пользователей
     result = await session.execute(select(User.user_id))
     user_ids = [row[0] for row in result.all()]
-    
+
     success_count = 0
     fail_count = 0
-    
+
     try:
         # Отправляем сообщение каждому пользователю
         for user_id in user_ids:
@@ -513,36 +511,36 @@ async def broadcast_confirm_send(callback: types.CallbackQuery, state: FSMContex
                         chat_id=user_id,
                         photo=photo_file_id,
                         caption=text,
-                        parse_mode=parse_mode
+                        parse_mode="HTML"
                     )
                 elif message_type == "video" and video_file_id:
                     await callback.message.bot.send_video(
                         chat_id=user_id,
                         video=video_file_id,
                         caption=text,
-                        parse_mode=parse_mode
+                        parse_mode="HTML"
                     )
                 elif message_type == "document" and document_file_id:
                     await callback.message.bot.send_document(
                         chat_id=user_id,
                         document=document_file_id,
                         caption=text,
-                        parse_mode=parse_mode
+                        parse_mode="HTML"
                     )
                 else:
                     await callback.message.bot.send_message(
                         chat_id=user_id,
                         text=text,
-                        parse_mode=parse_mode
+                        parse_mode="HTML"
                     )
                 success_count += 1
             except Exception as e:
                 logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
                 fail_count += 1
-            
+
             # Небольшая задержка для избежания лимитов
             await asyncio.sleep(0.05)
-        
+
         await callback.message.edit_text(
             f"✅ Рассылка завершена!\n\n"
             f"Всего пользователей: {len(user_ids)}\n"
@@ -550,16 +548,16 @@ async def broadcast_confirm_send(callback: types.CallbackQuery, state: FSMContex
             f"Не удалось: {fail_count}",
             reply_markup=get_admin_keyboard()
         )
-        
+
         logger.info(f"Админ {callback.from_user.id} провел рассылку: {success_count} успешно, {fail_count} неудачно")
-        
+
     except Exception as e:
         logger.error(f"Ошибка рассылки: {e}")
         await callback.message.edit_text(
             "❌ Произошла ошибка при рассылке.",
             reply_markup=get_admin_keyboard()
         )
-    
+
     await state.clear()
 
 

@@ -2,18 +2,19 @@ import io
 import qrcode
 from aiogram import Router, F, types
 from aiogram.filters import Command
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
+from datetime import datetime, timedelta
 from loguru import logger
 
 from database.models import User
-from keyboards.inline import get_profile_keyboard
+from keyboards.inline import get_profile_keyboard, get_main_menu_keyboard
 from services.marzban_api import marzban_service
-from config import settings
+from config import settings, get_db_setting
 
 router = Router()
+
 
 def format_bytes(bytes_value: int) -> str:
     """Конвертировать байты в человекочитаемый формат."""
@@ -21,16 +22,17 @@ def format_bytes(bytes_value: int) -> str:
         return "Безлимитно"
     if bytes_value <= 0:
         return "0 Б"
-    
+
     units = ["Б", "КБ", "МБ", "ГБ", "ТБ"]
     unit_index = 0
     value = float(bytes_value)
-    
+
     while value >= 1024 and unit_index < len(units) - 1:
         value /= 1024
         unit_index += 1
-        
+
     return f"{value:.2f} {units[unit_index]}"
+
 
 def generate_qr(data: str) -> BufferedInputFile:
     """Генерация QR-кода в памяти и возврат в виде файла для Telegram."""
@@ -38,12 +40,41 @@ def generate_qr(data: str) -> BufferedInputFile:
     qr.add_data(data)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
-    
+
     bio = io.BytesIO()
     img.save(bio, "PNG")
     bio.seek(0)
-    
+
     return BufferedInputFile(bio.read(), filename="qr.png")
+
+
+async def send_subscription_info(message: types.Message | types.CallbackQuery, vless_link: str):
+    """Отправить QR-код и ключ для платной подписки."""
+    if isinstance(message, types.CallbackQuery):
+        message = message.message
+
+    qr_file = generate_qr(vless_link)
+
+    success_text = (
+        f"✅ <b>Ваша подписка активна!</b>\n\n"
+        "🔑 <b>Ваш ключ (Прямая ссылка):</b>\n"
+        f"<code>{vless_link}</code>\n\n"
+        "📱 <b>Инструкция для iOS и Android:</b>\n"
+        "1. Установите приложение <b>Hiddify</b> из магазина приложений.\n"
+        "2. Откройте приложение, нажмите <b>«+»</b> в правом верхнем углу.\n"
+        "3. Выберите <b>«Сканировать QR-код»</b> и наведите камеру на код из этого сообщения.\n"
+        "4. Нажмите огромную круглую кнопку для подключения.\n\n"
+        "💻 <b>Инструкция для Windows и Mac:</b>\n"
+        "1. Скачайте Hiddify и откройте его.\n"
+        "2. Нажмите на текст ключа выше, чтобы скопировать его.\n"
+        "3. В приложении нажмите <b>«+»</b> -> <b>«Добавить из буфера обмена»</b>."
+    )
+
+    await message.answer_photo(
+        photo=qr_file,
+        caption=success_text,
+        reply_markup=get_main_menu_keyboard(show_trial=False)
+    )
 
 @router.callback_query(F.data == "profile")
 @router.message(Command("profile"))
@@ -192,5 +223,102 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
     except Exception as e:
         logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
         await callback.answer("❌ Произошла ошибка при получении ссылки", show_alert=True)
-        
+
     await callback.answer()
+
+
+@router.callback_query(F.data == "subscription")
+@router.message(Command("sub"))
+@router.message(F.text.startswith("Подписка"))
+async def show_subscription(callback_or_message: types.CallbackQuery | types.Message, session: AsyncSession):
+    """Показать информацию о платной подписке (QR-код и ключ)."""
+
+    if isinstance(callback_or_message, types.CallbackQuery):
+        callback = callback_or_message
+        message = callback.message
+        user_id = callback.from_user.id
+        await callback.answer()
+    else:
+        message = callback_or_message
+        callback = None
+        user_id = message.from_user.id
+
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        await message.answer("❌ Пользователь не найден. Нажмите /start")
+        return
+
+    # Проверяем, есть ли активная подписка
+    has_subscription = user.expire_date and user.expire_date > datetime.utcnow()
+
+    if has_subscription:
+        # У пользователя есть активная подписка - показываем ключ
+        if not user.marzban_username:
+            # Создаём аккаунт в Marzban
+            try:
+                marzban_data = await marzban_service.create_user(
+                    tg_id=user_id,
+                    username=user.username,
+                    expire_days=30,
+                    data_limit_gb=0.0
+                )
+                user.marzban_username = marzban_data.get("username")
+                await session.commit()
+                logger.info(f"Создан аккаунт Marzban для пользователя {user_id}")
+            except Exception as e:
+                logger.error(f"Ошибка создания аккаунта Marzban для {user_id}: {e}")
+                await message.answer(
+                    "❌ Ошибка создания VPN-аккаунта.\n\n"
+                    "Пожалуйста, обратитесь в поддержку.",
+                    reply_markup=get_main_menu_keyboard(show_trial=False)
+                )
+                return
+
+        try:
+            marzban_data = await marzban_service.get_user(user.marzban_username)
+            if not marzban_data:
+                # Аккаунт удалён - создаём заново
+                marzban_data = await marzban_service.create_user(
+                    tg_id=user_id,
+                    username=user.username,
+                    expire_days=30,
+                    data_limit_gb=0.0
+                )
+                user.marzban_username = marzban_data.get("username")
+                await session.commit()
+                logger.info(f"Пересоздан аккаунт Marzban для пользователя {user_id}")
+
+            links = marzban_data.get("links", [])
+            vless_link = links[0] if links else ""
+
+            if vless_link:
+                await send_subscription_info(message, vless_link)
+            else:
+                await message.answer(
+                    "❌ Не удалось получить ссылку на подписку.\n\n"
+                    "Пожалуйста, обратитесь в поддержку.",
+                    reply_markup=get_main_menu_keyboard(show_trial=False)
+                )
+        except Exception as e:
+            logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
+            await message.answer(
+                "❌ Произошла ошибка при получении ссылки.\n\n"
+                "Пожалуйста, попробуйте позже или обратитесь в поддержку.",
+                reply_markup=get_main_menu_keyboard(show_trial=False)
+            )
+    else:
+        # Нет активной подписки - предлагаем купить
+        price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
+        text = (
+            "📦 <b>Подписка</b>\n\n"
+            "❌ У вас нет активной подписки.\n\n"
+            "Вы можете оформить подписку\n"
+            "и продолжить пользоваться Nemo VPN без ограничений.\n\n"
+            f"💳 <b>Стоимость:</b> {price}₽/месяц"
+        )
+        await message.answer(
+            text=text,
+            reply_markup=get_main_menu_keyboard(show_trial=not user.is_trial_used)
+        )

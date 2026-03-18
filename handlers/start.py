@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 import uuid
+from datetime import datetime
 
 from database.models import User
 from keyboards.inline import get_main_menu_keyboard
@@ -120,6 +121,10 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot):
         if needs_commit:
             await session.commit()
 
+    # Проверяем наличие активной подписки
+    has_active_subscription = user.expire_date and user.expire_date > datetime.utcnow()
+    show_trial = not has_active_subscription and not user.is_trial_used
+
     # Приветственное сообщение
     welcome_text = (
         f"Привет, <b>{message.from_user.first_name}</b>!\n\n"
@@ -141,53 +146,104 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot):
 
     await message.answer(
         text=welcome_text,
-        reply_markup=get_main_menu_keyboard(),
+        reply_markup=get_main_menu_keyboard(show_trial=show_trial),
         parse_mode="HTML"
     )
     logger.info(f"Пользователь {user_id} запустил бота")
 
 
 @router.callback_query(F.data == "back_to_main")
-async def back_to_main(callback: CallbackQuery):
+async def back_to_main(callback: CallbackQuery, session: AsyncSession):
     """Вернуться в главное меню."""
+    user_id = callback.from_user.id
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    
+    has_active_subscription = user.expire_date and user.expire_date > datetime.utcnow() if user else False
+    show_trial = not has_active_subscription and not user.is_trial_used if user else True
+    
     await callback.message.edit_text(
         text="🏠 <b>Главное меню Nemo VPN</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu_keyboard(),
+        reply_markup=get_main_menu_keyboard(show_trial=show_trial),
         parse_mode="HTML"
     )
     await callback.answer()
 
 
 @router.message(F.text.startswith("Мой профиль"))
-async def show_profile_menu(message: Message):
+async def show_profile_menu(message: Message, session: AsyncSession):
     """Показать меню профиля."""
+    user_id = message.from_user.id
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    
+    has_active_subscription = user.expire_date and user.expire_date > datetime.utcnow() if user else False
+    show_trial = not has_active_subscription and not user.is_trial_used if user else True
+    
     await message.answer(
         text="Профиль пользователя\n\nВыберите действие:",
-        reply_markup=get_main_menu_keyboard(),
+        reply_markup=get_main_menu_keyboard(show_trial=show_trial),
     )
 
 
 @router.message(F.text.startswith("Купить подписку"))
-async def show_buy_menu(message: Message):
+async def show_buy_menu(message: Message, session: AsyncSession):
     """Показать меню покупки."""
+    user_id = message.from_user.id
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    
+    has_active_subscription = user.expire_date and user.expire_date > datetime.utcnow() if user else False
+    show_trial = not has_active_subscription and not user.is_trial_used if user else True
+    
     await message.answer(
         text="Магазин подписок\n\nВыберите тариф:",
-        reply_markup=get_main_menu_keyboard(),
+        reply_markup=get_main_menu_keyboard(show_trial=show_trial),
     )
 
 
-@router.message(F.text.startswith("Бесплатный триал"))
-async def show_trial_menu(message: Message):
-    """Показать меню триала."""
+@router.message(F.text.startswith("Пробная подписка"))
+async def show_trial_menu(message: Message, session: AsyncSession):
+    """Показать меню пробной подписки."""
+    user_id = message.from_user.id
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    
+    has_active_subscription = user.expire_date and user.expire_date > datetime.utcnow() if user else False
+    show_trial = not has_active_subscription and not user.is_trial_used if user else True
+    
     await message.answer(
-        text="Бесплатный триал\n\nПопробуйте наш VPN бесплатно в течение 24 часов!",
-        reply_markup=get_main_menu_keyboard(),
+        text="Пробная подписка\n\nПопробуйте наш VPN бесплатно в течение 24 часов!",
+        reply_markup=get_main_menu_keyboard(show_trial=show_trial),
+    )
+
+
+@router.message(F.text.startswith("Подписка"))
+async def show_subscription_menu(message: Message, session: AsyncSession):
+    """Показать меню подписки."""
+    user_id = message.from_user.id
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    
+    has_active_subscription = user.expire_date and user.expire_date > datetime.utcnow() if user else False
+    show_trial = not has_active_subscription and not user.is_trial_used if user else True
+    
+    await message.answer(
+        text="Подписка\n\nПроверьте статус вашей подписки",
+        reply_markup=get_main_menu_keyboard(show_trial=show_trial),
     )
 
 
 @router.message(F.text.startswith("Помощь"))
-async def show_help_menu(message: Message):
+async def show_help_menu(message: Message, session: AsyncSession):
     """Показать меню помощи."""
+    user_id = message.from_user.id
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    
+    has_active_subscription = user.expire_date and user.expire_date > datetime.utcnow() if user else False
+    show_trial = not has_active_subscription and not user.is_trial_used if user else True
+    
     help_text = (
         "Помощь и поддержка\n\n"
         "Если у вас возникли вопросы или проблемы:\n\n"
@@ -198,5 +254,5 @@ async def show_help_menu(message: Message):
     )
     await message.answer(
         text=help_text,
-        reply_markup=get_main_menu_keyboard(),
+        reply_markup=get_main_menu_keyboard(show_trial=show_trial),
     )

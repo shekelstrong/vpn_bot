@@ -48,6 +48,39 @@ from handlers.admin.settings import router as admin_settings_router
 from handlers.referrals import router as referrals_router
 
 
+async def update_trial_command_for_user(user_id: int, has_active_subscription: bool):
+    """Обновить команду /trial для конкретного пользователя."""
+    base_commands = [
+        BotCommand(command="start", description="Главное меню"),
+        BotCommand(command="me", description="Мой профиль"),
+        BotCommand(command="buy", description="Купить подписку"),
+        BotCommand(command="sub", description="Подписка"),
+        BotCommand(command="referral", description="Реферальная программа"),
+        BotCommand(command="help", description="Помощь"),
+    ]
+
+    # Добавляем /trial только если нет активной подписки
+    if not has_active_subscription:
+        base_commands.insert(4, BotCommand(command="trial", description="Пробный период"))
+
+    await bot.set_my_commands(
+        base_commands,
+        scope=BotCommandScopeChat(chat_id=user_id)
+    )
+
+
+async def update_trial_commands_for_all_users():
+    """Обновить команды для всех пользователей."""
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(select(User))
+        users = result.scalars().all()
+
+        for user in users:
+            has_subscription = user.expire_date and user.expire_date > datetime.utcnow()
+            await update_trial_command_for_user(user.user_id, has_subscription)
+
+
 # Настройка логгирования
 logger.remove()  # Удаляем стандартный обработчик
 logger.add(
@@ -140,58 +173,63 @@ async def cmd_me(message: Message):
 async def on_startup():
     """Действия при запуске бота."""
     logger.info("Запуск бота...")
-    
+
     # Инициализация базы данных
     await init_db()
     logger.info("База данных инициализирована")
-    
+
     # Инициализация дефолтных настроек
     factory = get_session_factory()
     async with factory() as session:
         await init_default_settings(session)
     logger.info("Дефолтные настройки инициализированы")
-    
+
     # Инициализация планировщика
     scheduler = create_scheduler(bot, get_session_factory())
     await scheduler.start()
     logger.info("Планировщик уведомлений запущен")
-    
+
     # Информация о боте
     bot_info = await bot.get_me()
     logger.info(f"Бот запущен: @{bot_info.username} (ID: {bot_info.id})")
-    
+
     # Информация об администраторах
     admin_count = len(settings.admin_ids_list)
     logger.info(f"Зарегистрировано администраторов: {admin_count}")
-    
+
     # Установка кнопки меню слева от поля ввода
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
     logger.info("Кнопка меню установлена")
 
-    # Установка команд для всех пользователей (без команды admin)
+    # Установка команд для всех пользователей
     base_commands = [
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="me", description="Мой профиль"),
         BotCommand(command="buy", description="Купить подписку"),
         BotCommand(command="sub", description="Подписка"),
+        BotCommand(command="trial", description="Пробный период"),
         BotCommand(command="referral", description="Реферальная программа"),
         BotCommand(command="help", description="Помощь"),
     ]
-    
+
     await bot.set_my_commands(base_commands, scope=BotCommandScopeAllPrivateChats())
     logger.info("Общие команды установлены")
-    
+
     # Установка команды admin только для администраторов
     admin_commands = [
         BotCommand(command="admin", description="Админ-панель"),
     ]
-    
+
     for admin_id in settings.admin_ids_list:
         await bot.set_my_commands(
             base_commands + admin_commands,
             scope=BotCommandScopeChat(chat_id=admin_id)
         )
     logger.info("Админские команды установлены")
+
+    # Скрываем команду /trial для пользователей с активной подпиской
+    await update_trial_commands_for_all_users()
+    logger.info("Команды /trial обновлены для всех пользователей")
 
 
 async def on_shutdown():
