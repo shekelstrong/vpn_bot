@@ -86,7 +86,8 @@ session_factory = get_session_factory()
 @dp.update.outer_middleware
 async def db_session_middleware(handler, event, data):
     """Middleware для передачи сессии БД в обработчики."""
-    async with session_factory() as session:
+    factory = get_session_factory()
+    async with factory() as session:
         data['session'] = session
         return await handler(event, data)
 
@@ -107,7 +108,8 @@ async def cmd_me(message: Message):
     """Показать информацию о текущем пользователе."""
     user_id = message.from_user.id
     
-    async with get_session_factory() as session:
+    session_factory = get_session_factory()
+    async with session_factory() as session:
         from sqlalchemy import select
         result = await session.execute(select(User).where(User.user_id == user_id))
         user = result.scalar_one_or_none()
@@ -144,7 +146,8 @@ async def on_startup():
     logger.info("База данных инициализирована")
     
     # Инициализация дефолтных настроек
-    async with get_session_factory() as session:
+    factory = get_session_factory()
+    async with factory() as session:
         await init_default_settings(session)
     logger.info("Дефолтные настройки инициализированы")
     

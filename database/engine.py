@@ -47,7 +47,8 @@ def get_session_factory() -> async_sessionmaker:
 
 async def get_db_session():
     """Получить новую сессию базы данных."""
-    async with get_session_factory() as session:
+    factory = get_session_factory()
+    async with factory() as session:
         try:
             yield session
             await session.commit()
