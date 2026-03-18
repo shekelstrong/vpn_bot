@@ -213,4 +213,8 @@ async def main():
     except KeyboardInterrupt:
         pass
     finally:
-        pass
+        await on_shutdown()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
