@@ -17,6 +17,7 @@ class AdminPanel(StatesGroup):
     waiting_for_user_search = State()
     waiting_for_gift_days = State()
     waiting_for_broadcast_message = State()
+    waiting_for_broadcast_confirm = State()
     waiting_for_reset_trial = State()
 
 

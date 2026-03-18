@@ -7,6 +7,7 @@ import asyncio
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
@@ -19,6 +20,7 @@ from keyboards.inline import (
     get_admin_user_search_keyboard,
     get_yes_no_keyboard,
     get_main_menu_keyboard,
+    get_back_keyboard,
 )
 from utils.states import AdminPanel
 from config import settings
@@ -390,36 +392,149 @@ async def admin_broadcast_start(callback: types.CallbackQuery, state: FSMContext
     await callback.message.answer(
         "📢 <b>Рассылка сообщений</b>\n\n"
         "Отправьте сообщение, которое нужно разослать всем пользователям.\n\n"
-        "Поддерживаются: текст, фото, видео, документы.\n\n"
-        "Нажмите /cancel для отмены."
+        "Поддерживаются: текст, фото, видео, документы.",
+        reply_markup=get_back_keyboard("admin_panel")
     )
     
     await callback.answer()
 
 
 @router.message(AdminPanel.waiting_for_broadcast_message)
-async def process_broadcast(message: types.Message, state: FSMContext, session: AsyncSession):
-    """Обработка рассылки."""
+async def process_broadcast(message: types.Message, state: FSMContext):
+    """Обработка рассылки - сохранение сообщения и показ предпросмотра."""
     if not is_admin(message.from_user.id):
         return
     
-    await message.answer(
-        "⏳ Начинаю рассылку...\n\n"
-        "Это может занять некоторое время."
+    # Сохраняем информацию о сообщении
+    message_type = "text"
+    photo_file_id = None
+    video_file_id = None
+    document_file_id = None
+    
+    if message.photo:
+        message_type = "photo"
+        photo_file_id = message.photo[-1].file_id
+    elif message.video:
+        message_type = "video"
+        video_file_id = message.video.file_id
+    elif message.document:
+        message_type = "document"
+        document_file_id = message.document.file_id
+    
+    await state.update_data(
+        message_type=message_type,
+        text=message.text or message.caption or "",
+        photo_file_id=photo_file_id,
+        video_file_id=video_file_id,
+        document_file_id=document_file_id,
+        parse_mode=message.parse_mode,
+        reply_markup=None
     )
     
+    # Показываем предпросмотр
+    preview_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Отправить всем", callback_data="broadcast_confirm_send")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="broadcast_cancel")]
+    ])
+    
+    await message.answer(
+        "📋 <b>Предпросмотр рассылки</b>\n\n"
+        "Это сообщение увидят все пользователи:\n\n"
+        "══════════════════════",
+        reply_markup=preview_keyboard
+    )
+    
+    # Отправляем копию сообщения как предпросмотр
     try:
-        # Получаем всех пользователей
-        result = await session.execute(select(User.user_id))
-        user_ids = [row[0] for row in result.all()]
-        
-        success_count = 0
-        fail_count = 0
-        
-        # Копируем сообщение каждому пользователю
+        if message_type == "photo":
+            await message.copy_to(chat_id=message.chat.id, reply_markup=preview_keyboard)
+        elif message_type == "video":
+            await message.copy_to(chat_id=message.chat.id, reply_markup=preview_keyboard)
+        elif message_type == "document":
+            await message.copy_to(chat_id=message.chat.id, reply_markup=preview_keyboard)
+        else:
+            await message.answer(
+                message.text or "Текстовое сообщение",
+                reply_markup=preview_keyboard
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при создании предпросмотра: {e}")
+        await message.answer("⚠️ Не удалось создать предпросмотр, но сообщение будет отправлено.", reply_markup=preview_keyboard)
+    
+    await state.set_state(AdminPanel.waiting_for_broadcast_confirm)
+
+
+@router.callback_query(F.data == "broadcast_cancel")
+async def broadcast_cancel(callback: types.CallbackQuery, state: FSMContext):
+    """Отмена рассылки."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await state.clear()
+    await callback.message.edit_text(
+        "❌ Рассылка отменена.",
+        reply_markup=get_admin_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "broadcast_confirm_send")
+async def broadcast_confirm_send(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Подтверждение и отправка рассылки."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await callback.answer("⏳ Начинаю рассылку...")
+    
+    # Получаем данные из состояния
+    data = await state.get_data()
+    message_type = data.get("message_type", "text")
+    text = data.get("text", "")
+    photo_file_id = data.get("photo_file_id")
+    video_file_id = data.get("video_file_id")
+    document_file_id = data.get("document_file_id")
+    parse_mode = data.get("parse_mode")
+    
+    # Получаем всех пользователей
+    result = await session.execute(select(User.user_id))
+    user_ids = [row[0] for row in result.all()]
+    
+    success_count = 0
+    fail_count = 0
+    
+    try:
+        # Отправляем сообщение каждому пользователю
         for user_id in user_ids:
             try:
-                await message.copy_to(chat_id=user_id)
+                if message_type == "photo" and photo_file_id:
+                    await callback.message.bot.send_photo(
+                        chat_id=user_id,
+                        photo=photo_file_id,
+                        caption=text,
+                        parse_mode=parse_mode
+                    )
+                elif message_type == "video" and video_file_id:
+                    await callback.message.bot.send_video(
+                        chat_id=user_id,
+                        video=video_file_id,
+                        caption=text,
+                        parse_mode=parse_mode
+                    )
+                elif message_type == "document" and document_file_id:
+                    await callback.message.bot.send_document(
+                        chat_id=user_id,
+                        document=document_file_id,
+                        caption=text,
+                        parse_mode=parse_mode
+                    )
+                else:
+                    await callback.message.bot.send_message(
+                        chat_id=user_id,
+                        text=text,
+                        parse_mode=parse_mode
+                    )
                 success_count += 1
             except Exception as e:
                 logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
@@ -428,16 +543,22 @@ async def process_broadcast(message: types.Message, state: FSMContext, session: 
             # Небольшая задержка для избежания лимитов
             await asyncio.sleep(0.05)
         
-        await message.answer(
+        await callback.message.edit_text(
             f"✅ Рассылка завершена!\n\n"
             f"Всего пользователей: {len(user_ids)}\n"
             f"Успешно: {success_count}\n"
-            f"Не удалось: {fail_count}"
+            f"Не удалось: {fail_count}",
+            reply_markup=get_admin_keyboard()
         )
+        
+        logger.info(f"Админ {callback.from_user.id} провел рассылку: {success_count} успешно, {fail_count} неудачно")
         
     except Exception as e:
         logger.error(f"Ошибка рассылки: {e}")
-        await message.answer("❌ Произошла ошибка при рассылке.")
+        await callback.message.edit_text(
+            "❌ Произошла ошибка при рассылке.",
+            reply_markup=get_admin_keyboard()
+        )
     
     await state.clear()
 

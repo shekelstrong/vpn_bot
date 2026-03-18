@@ -211,16 +211,27 @@ def get_yes_no_keyboard(
     return builder.as_markup()
 
 
-def get_subscription_duration_keyboard() -> InlineKeyboardMarkup:
+def get_subscription_duration_keyboard(
+    price_1m: float = 100,
+    price_3m: float = 270,
+    price_6m: float = 500,
+    price_12m: float = 900
+) -> InlineKeyboardMarkup:
     """
     Клавиатура выбора срока подписки.
+    
+    Args:
+        price_1m: Цена за 1 месяц
+        price_3m: Цена за 3 месяца
+        price_6m: Цена за 6 месяцев
+        price_12m: Цена за 12 месяцев
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="1 месяц - 100₽", callback_data="duration_1month", style="primary")
-    builder.button(text="3 месяца - 270₽", callback_data="duration_3month", style="primary")
-    builder.button(text="6 месяцев - 500₽", callback_data="duration_6month", style="primary")
-    builder.button(text="12 месяцев - 900₽", callback_data="duration_12month", style="primary")
+    builder.button(text=f"1 месяц - {int(price_1m)}₽", callback_data="duration_1month", style="primary")
+    builder.button(text=f"3 месяца - {int(price_3m)}₽", callback_data="duration_3month", style="primary")
+    builder.button(text=f"6 месяцев - {int(price_6m)}₽", callback_data="duration_6month", style="primary")
+    builder.button(text=f"12 месяцев - {int(price_12m)}₽", callback_data="duration_12month", style="primary")
     builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
     
     builder.adjust(1, 1)

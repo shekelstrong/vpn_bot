@@ -72,9 +72,11 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
         text += "Новая подписка продлит текущую.\n\n"
     
     # Рассчитываем цены с учетом скидок
+    prices = {}
     for key, period in SUBSCRIPTION_PERIODS.items():
         months = period["months"]
         price = await calculate_tariff_price(session, base_price, months)
+        prices[key] = price
         
         # Рассчитываем экономию (если есть скидка)
         discount_text = ""
@@ -88,7 +90,12 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
     
     await message.answer(
         text=text,
-        reply_markup=get_subscription_duration_keyboard()
+        reply_markup=get_subscription_duration_keyboard(
+            price_1m=prices.get("1month", base_price),
+            price_3m=prices.get("3month", base_price * 3),
+            price_6m=prices.get("6month", base_price * 6),
+            price_12m=prices.get("12month", base_price * 12)
+        )
     )
 
 @router.callback_query(F.data.startswith("duration"))
