@@ -23,6 +23,11 @@ from config import settings, get_db_setting, update_db_setting
 router = Router(name="settings_router")
 
 
+class SettingsStates(StatesGroup):
+    """Состояния для FSM настроек."""
+    waiting_for_price = State()
+
+
 def is_admin(user_id: int) -> bool:
     """Проверить, является ли пользователь администратором."""
     return user_id in settings.admin_ids_list
@@ -187,8 +192,3 @@ async def show_user_management(callback: CallbackQuery):
         reply_markup=get_back_keyboard("settings")
     )
     await callback.answer()
-
-
-class SettingsStates(StatesGroup):
-    """Состояния для FSM настроек."""
-    waiting_for_price = State()
