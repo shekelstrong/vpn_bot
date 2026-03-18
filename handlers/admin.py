@@ -1,0 +1,512 @@
+"""
+Обработчик админ-панели.
+Управление пользователями, статистика, рассылки.
+"""
+
+from aiogram import Router, F, types
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timedelta
+from loguru import logger
+
+from database.models import User, Transaction, PaymentInvoice
+from database.engine import get_session_factory
+from keyboards.inline import (
+    get_admin_keyboard,
+    get_admin_user_search_keyboard,
+    get_yes_no_keyboard,
+    get_main_menu_keyboard,
+)
+from utils.states import AdminPanel
+from config import settings
+
+router = Router()
+
+
+def is_admin(user_id: int) -> bool:
+    """Проверить, является ли пользователь администратором."""
+    return user_id in settings.admin_ids_list
+
+
+@router.message(Command("admin"))
+async def cmd_admin(message: types.Message):
+    """Открыть админ-панель."""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        logger.warning(f"Попытка доступа к админке от неавторизованного пользователя {user_id}")
+        await message.answer("❌ У вас нет доступа к админ-панели.")
+        return
+    
+    await message.answer(
+        text="🔧 <b>Админ-панель Nemo VPN</b>\n\n"
+             "Выберите действие:",
+        reply_markup=get_admin_keyboard(),
+    )
+    
+    logger.info(f"Админ {user_id} открыл админ-панель")
+
+
+@router.callback_query(F.data == "admin_panel")
+async def admin_panel(callback: types.CallbackQuery):
+    """Показать админ-панель."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        text="🔧 <b>Админ-панель</b>\n\nВыберите действие:",
+        reply_markup=get_admin_keyboard(),
+    )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: types.CallbackQuery, session: AsyncSession):
+    """Показать статистику."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    try:
+        # Общая статистика пользователей
+        total_users = await session.execute(select(func.count(User.user_id)))
+        total_users = total_users.scalar()
+        
+        # Активные пользователи (с подпиской)
+        now = datetime.utcnow()
+        active_users = await session.execute(
+            select(func.count(User.user_id)).where(User.expire_date > now)
+        )
+        active_users = active_users.scalar()
+        
+        # Пользователи с триалом
+        trial_users = await session.execute(
+            select(func.count(User.user_id)).where(User.is_trial_used == True)
+        )
+        trial_users = trial_users.scalar()
+        
+        # Общая выручка
+        total_revenue = await session.execute(
+            select(func.sum(Transaction.amount)).where(Transaction.status == "paid")
+        )
+        total_revenue = total_revenue.scalar() or 0
+        
+        # Активные счета
+        pending_invoices = await session.execute(
+            select(func.count(PaymentInvoice.id)).where(
+                PaymentInvoice.status == "pending"
+            )
+        )
+        pending_invoices = pending_invoices.scalar()
+        
+        # Рефералы
+        users_with_referrals = await session.execute(
+            select(func.count(User.user_id)).where(User.referrer_id.isnot(None))
+        )
+        users_with_referrals = users_with_referrals.scalar()
+        
+        stats_text = (
+            "📊 <b>Статистика Nemo VPN</b>\n\n"
+            
+            f"👥 <b>Пользователи:</b>\n"
+            f"• Всего: {total_users}\n"
+            f"• Активные: {active_users}\n"
+            f"• С триалом: {trial_users}\n"
+            f"• С рефералами: {users_with_referrals}\n\n"
+            
+            f"💰 <b>Финансы:</b>\n"
+            f"• Общая выручка: {total_revenue:.2f}₽\n"
+            f"• Активных счетов: {pending_invoices}\n\n"
+            
+            f"📈 <b>Конверсия:</b>\n"
+            f"• Активные/Всего: {(active_users/total_users*100) if total_users else 0:.1f}%\n"
+        )
+        
+        await callback.message.edit_text(
+            text=stats_text,
+            reply_markup=get_admin_keyboard(),
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка получения статистики: {e}")
+        await callback.answer("❌ Ошибка при получении статистики", show_alert=True)
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_users")
+async def admin_users(callback: types.CallbackQuery):
+    """Меню управления пользователями."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        text="👥 <b>Управление пользователями</b>\n\n"
+             "Найдите пользователя для управления:",
+        reply_markup=get_admin_user_search_keyboard(),
+    )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_find_by_id")
+async def admin_find_by_id(callback: types.CallbackQuery, state: FSMContext):
+    """Поиск пользователя по ID."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await state.set_state(AdminPanel.waiting_for_user_search)
+    await state.update_data(search_type="id")
+    
+    await callback.message.answer(
+        "🔍 Введите Telegram ID пользователя:\n\n"
+        "Или нажмите /cancel для отмены."
+    )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_find_by_username")
+async def admin_find_by_username(callback: types.CallbackQuery, state: FSMContext):
+    """Поиск пользователя по username."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await state.set_state(AdminPanel.waiting_for_user_search)
+    await state.update_data(search_type="username")
+    
+    await callback.message.answer(
+        "🔍 Введите username пользователя (без @):\n\n"
+        "Или нажмите /cancel для отмены."
+    )
+    
+    await callback.answer()
+
+
+@router.message(AdminPanel.waiting_for_user_search)
+async def process_user_search(message: types.Message, state: FSMContext, session: AsyncSession):
+    """Обработка поиска пользователя."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    data = await state.get_data()
+    search_type = data.get("search_type", "id")
+    search_value = message.text.strip()
+    
+    try:
+        if search_type == "id":
+            user_id = int(search_value)
+            result = await session.execute(
+                select(User).where(User.user_id == user_id)
+            )
+        else:
+            # Удаляем @ если есть
+            username = search_value.lstrip("@")
+            result = await session.execute(
+                select(User).where(User.username == username)
+            )
+        
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            await message.answer(
+                f"❌ Пользователь не найден.\n\n"
+                f"Попробуйте ещё раз или нажмите /cancel."
+            )
+            return
+        
+        # Получаем информацию о пользователе
+        user_info = (
+            f"👤 <b>Информация о пользователе</b>\n\n"
+            f"<b>ID:</b> <code>{user.user_id}</code>\n"
+            f"<b>Username:</b> @{user.username if user.username else 'N/A'}\n"
+            f"<b>Marzban:</b> <code>{user.marzban_username or 'N/A'}</code>\n\n"
+            f"<b>Баланс:</b> {user.balance:.2f}₽\n"
+            f"<b>Триал:</b> {'Использован' if user.is_trial_used else 'Не использован'}\n\n"
+        )
+        
+        if user.expire_date:
+            days_left = (user.expire_date - datetime.utcnow()).days
+            if days_left > 0:
+                user_info += f"<b>Подписка:</b> Активна ({days_left} дн.)\n"
+                user_info += f"<b>Истекает:</b> {user.expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+            else:
+                user_info += f"<b>Подписка:</b> Истекла\n"
+                user_info += f"<b>Дата:</b> {user.expire_date.strftime('%d.%m.%Y %H:%M')}\n"
+        else:
+            user_info += "<b>Подписка:</b> Отсутствует\n"
+        
+        if user.referrer_id:
+            user_info += f"<b>Реферер:</b> <code>{user.referrer_id}</code>\n"
+        
+        # Получаем количество рефералов
+        referrals = await session.execute(
+            select(func.count(User.user_id)).where(User.referrer_id == user.user_id)
+        )
+        referral_count = referrals.scalar()
+        user_info += f"<b>Рефералов:</b> {referral_count}\n"
+        
+        await message.answer(
+            text=user_info,
+            reply_markup=get_yes_no_keyboard(
+                yes_callback=f"admin_gift_sub:{user.user_id}",
+                no_callback="admin_users",
+                question="Выдать подписку?"
+            ),
+        )
+        
+        await state.clear()
+        
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат ID.\n\n"
+            "Введите числовое значение или нажмите /cancel."
+        )
+    except Exception as e:
+        logger.error(f"Ошибка поиска пользователя: {e}")
+        await message.answer("❌ Произошла ошибка при поиске.")
+        await state.clear()
+
+
+@router.callback_query(F.data.startswith("admin_gift_sub:"))
+async def admin_gift_sub_start(callback: types.CallbackQuery, state: FSMContext):
+    """Начало процесса выдачи подарочной подписки."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    user_id = callback.data.split(":")[1]
+    await state.update_data(gift_user_id=user_id)
+    await state.set_state(AdminPanel.waiting_for_gift_days)
+    
+    await callback.message.answer(
+        "🎁 Введите количество дней подписки:\n\n"
+        "Или нажмите /cancel для отмены."
+    )
+    
+    await callback.answer()
+
+
+@router.message(AdminPanel.waiting_for_gift_days)
+async def process_gift_days(message: types.Message, state: FSMContext, session: AsyncSession):
+    """Обработка выдачи подарочной подписки."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    try:
+        days = int(message.text.strip())
+        
+        if days <= 0 or days > 365:
+            await message.answer(
+                "❌ Количество дней должно быть от 1 до 365.\n\n"
+                "Введите значение ещё раз."
+            )
+            return
+        
+        data = await state.get_data()
+        gift_user_id = int(data.get("gift_user_id"))
+        
+        # Получаем пользователя
+        result = await session.execute(
+            select(User).where(User.user_id == gift_user_id)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            await message.answer("❌ Пользователь не найден.")
+            await state.clear()
+            return
+        
+        # Продлеваем подписку
+        if user.expire_date and user.expire_date > datetime.utcnow():
+            new_expire = user.expire_date + timedelta(days=days)
+        else:
+            new_expire = datetime.utcnow() + timedelta(days=days)
+        
+        user.expire_date = new_expire
+        
+        # Если есть Marzban пользователь, продлеваем там
+        if user.marzban_username:
+            from services.marzban_api import marzban_service
+            try:
+                await marzban_service.update_user_expiry(
+                    user.marzban_username,
+                    days
+                )
+            except Exception as e:
+                logger.error(f"Ошибка продления в Marzban: {e}")
+        
+        await session.commit()
+        
+        await message.answer(
+            f"✅ Подписка продлена!\n\n"
+            f"Пользователь: <code>{gift_user_id}</code>\n"
+            f"Дней: {days}\n"
+            f"Новая дата истечения: {new_expire.strftime('%d.%m.%Y %H:%M')}"
+        )
+        
+        # Уведомляем пользователя
+        try:
+            await message.bot.send_message(
+                chat_id=gift_user_id,
+                text=(
+                    f"🎁 <b>Вам подарена подписка!</b>\n\n"
+                    f"Администратор добавил {days} дней к вашей подписке.\n\n"
+                    f"Новая дата истечения: {new_expire.strftime('%d.%m.%Y %H:%M')}\n\n"
+                    f"Спасибо за использование Nemo VPN! 💙"
+                ),
+            )
+        except Exception:
+            pass
+        
+        await state.clear()
+        
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат.\n\n"
+            "Введите число дней или нажмите /cancel."
+        )
+    except Exception as e:
+        logger.error(f"Ошибка выдачи подарочной подписки: {e}")
+        await message.answer("❌ Произошла ошибка.")
+        await state.clear()
+
+
+@router.callback_query(F.data == "admin_broadcast")
+async def admin_broadcast_start(callback: types.CallbackQuery, state: FSMContext):
+    """Начало рассылки."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await state.set_state(AdminPanel.waiting_for_broadcast_message)
+    
+    await callback.message.answer(
+        "📢 <b>Рассылка сообщений</b>\n\n"
+        "Отправьте сообщение, которое нужно разослать всем пользователям.\n\n"
+        "Поддерживаются: текст, фото, видео, документы.\n\n"
+        "Нажмите /cancel для отмены."
+    )
+    
+    await callback.answer()
+
+
+@router.message(AdminPanel.waiting_for_broadcast_message)
+async def process_broadcast(message: types.Message, state: FSMContext, session: AsyncSession):
+    """Обработка рассылки."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    await message.answer(
+        "⏳ Начинаю рассылку...\n\n"
+        "Это может занять некоторое время."
+    )
+    
+    try:
+        # Получаем всех пользователей
+        result = await session.execute(select(User.user_id))
+        user_ids = [row[0] for row in result.all()]
+        
+        success_count = 0
+        fail_count = 0
+        
+        # Копируем сообщение каждому пользователю
+        for user_id in user_ids:
+            try:
+                if message.photo:
+                    await message.bot.send_photo(
+                        chat_id=user_id,
+                        photo=message.photo[-1].file_id,
+                        caption=message.caption,
+                    )
+                elif message.video:
+                    await message.bot.send_video(
+                        chat_id=user_id,
+                        video=message.video.file_id,
+                        caption=message.caption,
+                    )
+                elif message.document:
+                    await message.bot.send_document(
+                        chat_id=user_id,
+                        document=message.document.file_id,
+                        caption=message.caption,
+                    )
+                else:
+                    await message.bot.send_message(
+                        chat_id=user_id,
+                        text=message.text or message.caption or "",
+                    )
+                
+                success_count += 1
+                
+            except Exception as e:
+                logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+                fail_count += 1
+            
+            # Небольшая задержка для избежания лимитов
+            await asyncio.sleep(0.05)
+        
+        await message.answer(
+            f"✅ Рассылка завершена!\n\n"
+            f"Всего пользователей: {len(user_ids)}\n"
+            f"Успешно: {success_count}\n"
+            f"Не удалось: {fail_count}"
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка рассылки: {e}")
+        await message.answer("❌ Произошла ошибка при рассылке.")
+    
+    await state.clear()
+
+
+@router.callback_query(F.data == "admin_settings")
+async def admin_settings(callback: types.CallbackQuery):
+    """Настройки (заглушка)."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await callback.message.answer(
+        "⚙️ <b>Настройки</b>\n\n"
+        "Раздел в разработке.\n\n"
+        "Здесь будут настройки бота."
+    )
+    
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_close")
+async def admin_close(callback: types.CallbackQuery):
+    """Закрыть админ-панель."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await callback.message.edit_text(
+        text="🔒 Админ-панель закрыта.",
+        reply_markup=get_main_menu_keyboard(),
+    )
+    
+    await callback.answer()
+
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: types.Message, state: FSMContext):
+    """Отмена текущего действия."""
+    await state.clear()
+    await message.answer(
+        "❌ Отменено.\n\nВыберите действие:",
+        reply_markup=get_admin_keyboard() if is_admin(message.from_user.id) else get_main_menu_keyboard(),
+    )
+
+
+# Импортируем asyncio в конце
+import asyncio
