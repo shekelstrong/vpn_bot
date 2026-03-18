@@ -14,7 +14,7 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     Кнопки:
         - Мой профиль 👤
         - Купить подписку 📦
-        - Бесплатный триал 🎁
+        - Действующая подписка 📦
         - Реферальная программа 👥
         - Помощь 🆘
     """
@@ -22,7 +22,7 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     
     builder.button(text="Мой профиль 👤", callback_data="profile", style="primary")
     builder.button(text="Купить подписку 📦", callback_data="buy", style="primary")
-    builder.button(text="Бесплатный триал 🎁", callback_data="trial", style="success")
+    builder.button(text="Действующая подписка 📦", callback_data="sub", style="success")
     builder.button(text="Реферальная программа 👥", callback_data="referral", style="primary")
     builder.button(text="Помощь 🆘", callback_data="help", style="primary")
     
@@ -47,10 +47,11 @@ def get_profile_keyboard(
         builder.button(text="Получить ссылку 🔗", callback_data="get_vless_link", style="primary")
     
     builder.button(text="Реферальная программа 👥", callback_data="referral", style="primary")
-    builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
     
     if has_subscription:
         builder.button(text="Продлить подписку 💳", callback_data="buy_extend", style="primary")
+    
+    builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
     
     builder.adjust(1, 1)
     return builder.as_markup()
