@@ -119,11 +119,15 @@ class MarzbanService:
         tg_id: int,
         username: Optional[str] = None,
         expire_days: int = 30,
+        expire_hours: Optional[int] = None,
         data_limit_gb: float = 0.0
     ) -> Dict[str, Any]:
         """Создать нового пользователя в Marzban."""
         marzban_username = f"user_{tg_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-        expire_date = datetime.utcnow() + timedelta(days=expire_days)
+        if expire_hours:
+            expire_date = datetime.utcnow() + timedelta(hours=expire_hours)
+        else:
+            expire_date = datetime.utcnow() + timedelta(days=expire_days)
         
         proxies = {
             "vless": {

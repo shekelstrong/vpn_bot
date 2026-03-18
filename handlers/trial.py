@@ -64,9 +64,10 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, v
 
 @router.callback_query(F.data == "sub")
 @router.message(Command("sub"))
+@router.message(F.text.startswith("Подписка"))
 @router.message(F.text.startswith("Действующая подписка"))
 async def show_trial(callback_or_message: types.CallbackQuery | types.Message, session: AsyncSession):
-    """Показать информацию о действующей подписке."""
+    """Показать информацию о подписке или предложить активировать триал."""
     
     if isinstance(callback_or_message, types.CallbackQuery):
         callback = callback_or_message
@@ -88,44 +89,61 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
     has_subscription = user.expire_date and user.expire_date > datetime.utcnow()
     
     if has_subscription:
-        if user.marzban_username:
+        if not user.marzban_username:
             try:
-                marzban_data = await marzban_service.get_user(user.marzban_username)
-                if marzban_data:
-                    links = marzban_data.get("links", [])
-                    vless_link = links[0] if links else ""
-                    
-                    if vless_link:
-                        await send_subscription_info(message, vless_link)
-                    else:
-                        await message.answer(
-                            "❌ Не удалось получить ссылку на подписку.\n\n"
-                            "Пожалуйста, обратитесь в поддержку.",
-                            reply_markup=get_main_menu_keyboard()
-                        )
-                else:
-                    await message.answer(
-                        "❌ Ваш VPN-аккаунт был заархивирован на сервере.\n\n"
-                        "Пожалуйста, оформите новую подписку для создания нового ключа.",
-                        reply_markup=get_main_menu_keyboard()
-                    )
+                marzban_data = await marzban_service.create_user(
+                    tg_id=user_id,
+                    username=user.username,
+                    expire_days=30,
+                    data_limit_gb=0.0
+                )
+                user.marzban_username = marzban_data.get("username")
+                await session.commit()
+                logger.info(f"Создан аккаунт Marzban для пользователя {user_id} с существующей подпиской")
             except Exception as e:
-                logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
+                logger.error(f"Ошибка создания аккаунта Marzban для {user_id}: {e}")
                 await message.answer(
-                    "❌ Произошла ошибка при получении ссылки.\n\n"
-                    "Пожалуйста, попробуйте позже или обратитесь в поддержку.",
+                    "❌ Ошибка создания VPN-аккаунта.\n\n"
+                    "Пожалуйста, обратитесь в поддержку.",
                     reply_markup=get_main_menu_keyboard()
                 )
-        else:
+                return
+        
+        try:
+            marzban_data = await marzban_service.get_user(user.marzban_username)
+            if not marzban_data:
+                marzban_data = await marzban_service.create_user(
+                    tg_id=user_id,
+                    username=user.username,
+                    expire_days=30,
+                    data_limit_gb=0.0
+                )
+                user.marzban_username = marzban_data.get("username")
+                await session.commit()
+                logger.info(f"Пересоздан аккаунт Marzban для пользователя {user_id}")
+            
+            links = marzban_data.get("links", [])
+            vless_link = links[0] if links else ""
+            
+            if vless_link:
+                await send_subscription_info(message, vless_link)
+            else:
+                await message.answer(
+                    "❌ Не удалось получить ссылку на подписку.\n\n"
+                    "Пожалуйста, обратитесь в поддержку.",
+                    reply_markup=get_main_menu_keyboard()
+                )
+        except Exception as e:
+            logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
             await message.answer(
-                "❌ У вас нет активной подписки.\n\n"
-                "Пожалуйста, оформите подписку для доступа к VPN.",
+                "❌ Произошла ошибка при получении ссылки.\n\n"
+                "Пожалуйста, попробуйте позже или обратитесь в поддержку.",
                 reply_markup=get_main_menu_keyboard()
             )
     elif user.is_trial_used:
         price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
         text = (
-            "📦 <b>Действующая подписка</b>\n\n"
+            "📦 <b>Подписка</b>\n\n"
             "❌ У вас нет активной подписки.\n\n"
             "Вы можете оформить подписку\n"
             "и продолжить пользоваться Nemo VPN без ограничений.\n\n"
@@ -189,8 +207,6 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
         trial_hours = await get_db_setting(session, "trial_hours", "24")
         trial_limit = await get_db_setting(session, "trial_data_limit", "1")
         
-        marzban_username = f"trial_{user_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-        
         marzban_data = await marzban_service.create_user(
             tg_id=user_id,
             username=user.username,
@@ -198,7 +214,7 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
             data_limit_gb=int(trial_limit)
         )
         
-        user.marzban_username = marzban_username
+        user.marzban_username = marzban_data.get("username")
         user.is_trial_used = True
         user.expire_date = datetime.utcnow() + timedelta(hours=int(trial_hours))
         await session.commit()

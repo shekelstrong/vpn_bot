@@ -13,14 +13,14 @@ def get_main_reply_keyboard() -> ReplyKeyboardMarkup:
     Кнопки:
         - Мой профиль 👤
         - Купить подписку 📦
-        - Действующая подписка 📦
+        - Подписка 📦
         - Помощь 🆘
     """
     builder = ReplyKeyboardBuilder()
     
     builder.button(text="Мой профиль 👤")
     builder.button(text="Купить подписку 📦")
-    builder.button(text="Действующая подписка 📦")
+    builder.button(text="Подписка 📦")
     builder.button(text="Помощь 🆘")
     
     builder.adjust(2, 2)

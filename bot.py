@@ -173,7 +173,7 @@ async def on_startup():
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="me", description="Мой профиль"),
         BotCommand(command="buy", description="Купить подписку"),
-        BotCommand(command="sub", description="Действующая подписка"),
+        BotCommand(command="sub", description="Подписка"),
         BotCommand(command="referral", description="Реферальная программа"),
         BotCommand(command="help", description="Помощь"),
     ]
