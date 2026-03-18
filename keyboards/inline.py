@@ -226,10 +226,13 @@ def get_subscription_duration_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_back_keyboard() -> InlineKeyboardMarkup:
+def get_back_keyboard(callback_data: str = "back_to_main") -> InlineKeyboardMarkup:
     """
     Простая клавиатура с кнопкой Назад.
+    
+    Args:
+        callback_data: Callback для кнопки (по умолчанию "back_to_main").
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
+    builder.button(text="Назад ↩️", callback_data=callback_data, style="danger")
     return builder.as_markup()
