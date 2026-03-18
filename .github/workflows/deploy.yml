@@ -25,4 +25,4 @@ jobs:
             git pull
             
             # Пересобираем и перезапускаем контейнеры (бота и вебхуки) в фоновом режиме
-            docker-compose up -d --build
+            docker compose up -d --build
