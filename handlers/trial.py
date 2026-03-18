@@ -15,7 +15,7 @@ from loguru import logger
 from database.models import User
 from keyboards.inline import get_trial_keyboard, get_main_menu_keyboard
 from services.marzban_api import marzban_service
-from config import settings
+from config import settings, get_db_setting
 
 router = Router()
 
@@ -55,12 +55,13 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
         return
 
     if user.is_trial_used:
+        price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
         text = (
             "🎁 <b>Бесплатный триал</b>\n\n"
             "❌ Вы уже использовали пробный период.\n\n"
             "Но не расстраивайтесь! Вы можете оформить подписку\n"
             "и продолжить пользоваться Nemo VPN без ограничений.\n\n"
-            f"💳 <b>Стоимость:</b> {settings.SUBSCRIPTION_PRICE_RUB}₽/месяц"
+            f"💳 <b>Стоимость:</b> {price}₽/месяц"
         )
         await message.answer(
             text=text,

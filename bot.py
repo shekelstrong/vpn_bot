@@ -163,18 +163,36 @@ async def on_startup():
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
     logger.info("Кнопка меню установлена")
 
-    # Установка команд
-    commands = [
+    # Установка команд (для всех пользователей)
+    base_commands = [
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="me", description="Мой профиль"),
         BotCommand(command="buy", description="Купить подписку"),
         BotCommand(command="trial", description="Бесплатный триал"),
         BotCommand(command="referral", description="Реферальная программа"),
         BotCommand(command="help", description="Помощь"),
-        BotCommand(command="admin", description="Админ-панель"),
     ]
-    await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-    logger.info("Команды настроены")
+    
+    # Проверяем, кто запускает бота (для определения admin команды)
+    bot_info = await bot.get_me()
+    
+    # Команды для админов (добавляем команду /admin только для них)
+    async with get_session_factory()() as session:
+        try:
+            from aiogram.types import BotCommandScopeChat, BotCommandScopeAllPrivateChats
+            
+            # Для админов - все команды включая /admin
+            admin_commands = base_commands + [
+                BotCommand(command="admin", description="Админ-панель")
+            ]
+            await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=list(settings.admin_ids_list)))
+            logger.info(f"Админ-команды установлены для {len(settings.admin_ids_list)} админов")
+            
+            # Для остальных - базовые команды без /admin
+            await bot.set_my_commands(base_commands, scope=BotCommandScopeAllPrivateChats())
+            logger.info("Общие команды установлены")
+        except Exception as e:
+            logger.warning(f"Не удалось установить команды: {e}")
     
     logger.info("=" * 50)
     logger.info("Nemo VPN Bot готов к работе!")
