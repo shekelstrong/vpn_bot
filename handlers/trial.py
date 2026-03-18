@@ -88,7 +88,40 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
     has_subscription = user.expire_date and user.expire_date > datetime.utcnow()
     
     if has_subscription:
-        await send_subscription_info(message, user.vless_link or "")
+        if user.marzban_username:
+            try:
+                marzban_data = await marzban_service.get_user(user.marzban_username)
+                if marzban_data:
+                    links = marzban_data.get("links", [])
+                    vless_link = links[0] if links else ""
+                    
+                    if vless_link:
+                        await send_subscription_info(message, vless_link)
+                    else:
+                        await message.answer(
+                            "❌ Не удалось получить ссылку на подписку.\n\n"
+                            "Пожалуйста, обратитесь в поддержку.",
+                            reply_markup=get_main_menu_keyboard()
+                        )
+                else:
+                    await message.answer(
+                        "❌ Ваш VPN-аккаунт был заархивирован на сервере.\n\n"
+                        "Пожалуйста, оформите новую подписку для создания нового ключа.",
+                        reply_markup=get_main_menu_keyboard()
+                    )
+            except Exception as e:
+                logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
+                await message.answer(
+                    "❌ Произошла ошибка при получении ссылки.\n\n"
+                    "Пожалуйста, попробуйте позже или обратитесь в поддержку.",
+                    reply_markup=get_main_menu_keyboard()
+                )
+        else:
+            await message.answer(
+                "❌ У вас нет активной подписки.\n\n"
+                "Пожалуйста, оформите подписку для доступа к VPN.",
+                reply_markup=get_main_menu_keyboard()
+            )
     elif user.is_trial_used:
         price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
         text = (
