@@ -192,8 +192,8 @@ async def cmd_me(message: Message):
                 f"ID: <code>{user.user_id}</code>\n"
                 f"Username: @{user.username or 'N/A'}\n"
                 f"Marzban: <code>{user.marzban_username or 'N/A'}</code>\n"
-                f"Баланс: {user.balance:.2f}<}₽\n\n"
-                f"Реф. баланс: {user.referral_balance:.2f}<}₽\n"
+                f"Баланс: {user.balance:.2f}₽\n\n"
+                f"Реф. баланс: {user.referral_balance:.2f}₽\n"
                 f"Триал: {'Использован' if user.is_trial_used else 'Доступен'}\n"
             )
             
