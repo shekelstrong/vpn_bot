@@ -24,5 +24,9 @@ jobs:
             git reset --hard HEAD
             git pull
             
+            # Создаем папку для логов и выдаем права, чтобы бот мог туда писать
+            mkdir -p logs
+            chmod 777 logs
+            
             # Пересобираем и перезапускаем контейнеры (бота и вебхуки) в фоновом режиме
             docker compose up -d --build
