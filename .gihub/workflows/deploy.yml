@@ -1,0 +1,28 @@
+name: Deploy VPN Bot to Server
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Переходим в папку с проектом
+            cd ~/projects/vpn_bot
+            
+            # Сбрасываем любые случайные изменения на сервере и скачиваем свежий код
+            git reset --hard HEAD
+            git pull
+            
+            # Пересобираем и перезапускаем контейнеры (бота и вебхуки) в фоновом режиме
+            docker-compose up -d --build
