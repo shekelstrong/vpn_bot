@@ -278,7 +278,7 @@ async def main():
     # Регистрируем обработчики сигналов
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop = asyncio.get_running_loop()
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(main(), lambda: loop.create_task(loop.stop(), soft=True), soft=True)
+        loop.add_signal_handler(sig, lambda: asyncio.create_task(on_shutdown()))
     
     # Запускаем бота
     try:
