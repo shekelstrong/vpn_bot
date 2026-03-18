@@ -69,6 +69,11 @@ async def show_referral_link(callback: CallbackQuery, session: AsyncSession):
     """Показать реферальную ссылку для приглашения друзей."""
     user_id = callback.from_user.id
     bot_info = await callback.bot.get_me()
+    
+    if not bot_info.username:
+        await callback.answer("Ошибка: имя бота не найдено", show_alert=True)
+        return
+    
     ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
     
     from keyboards.inline import get_back_keyboard

@@ -186,7 +186,8 @@ async def settings_users(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("tariff_"))
+@router.callback_query(F.data == "tariff_price")
+@router.callback_query(F.data == "tariff_duration")
 async def edit_tariff(callback: CallbackQuery, state: FSMContext):
     """Редактирование тарифа."""
     if not is_admin(callback.from_user.id):
@@ -206,7 +207,10 @@ async def edit_tariff(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("referral_"))
+@router.callback_query(F.data == "referral_level1")
+@router.callback_query(F.data == "referral_level2")
+@router.callback_query(F.data == "referral_level3")
+@router.callback_query(F.data == "referral_min_withdraw")
 async def edit_referral(callback: CallbackQuery, state: FSMContext):
     """Редактирование реферальной системы."""
     if not is_admin(callback.from_user.id):
@@ -227,7 +231,8 @@ async def edit_referral(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("trial_"))
+@router.callback_query(F.data == "trial_hours")
+@router.callback_query(F.data == "trial_data_limit")
 async def edit_trial(callback: CallbackQuery, state: FSMContext):
     """Редактирование триала."""
     if not is_admin(callback.from_user.id):
@@ -238,10 +243,7 @@ async def edit_trial(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminSettings.waiting_for_trial_value)
     await state.update_data(trial_type=action)
     
-    if action == "hours":
-        text = "⏰ Введите новый срок действия триала (в часах):"
-    else:
-        text = "📦 Введите новый лимит трафика для триала (в GB):"
+    text = "⏰ Введите новый срок действия триала (в часах):" if action == "hours" else "📦 Введите новый лимит трафика для триала (в GB):"
     
     await callback.message.answer(text)
     await callback.answer()
