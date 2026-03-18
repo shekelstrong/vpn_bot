@@ -66,7 +66,6 @@ logger.add(
     retention="7 days",
     level="DEBUG",
     format="{time:YYYY-MM-DD HH:mm:ss} | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}:{line}</cyan>",
-    level="INFO",
 )
 
 # Создаем бота и диспетчер
@@ -84,7 +83,7 @@ dp = Dispatcher()
 session_factory = get_session_factory()
 
 
-@dp.update.outer_middleware()
+@dp.update.outer_middleware
 async def db_session_middleware(handler, event, data):
     """Middleware для передачи сессии БД в обработчики."""
     async with session_factory()() as session:
@@ -101,79 +100,6 @@ dp.include_router(help_router)
 dp.include_router(admin_router)
 dp.include_router(admin_settings_router)
 dp.include_router(referrals_router)
-
-
-@dp.message(Command("ping"))
-async def cmd_ping(message: Message):
-    """Проверка работоспособности бота."""
-    await message.answer("🏓 <b>Pong!</b>\n\nБот работает исправно.")
-
-
-@dp.message(Command("me"))
-async def cmd_me(message: Message):
-    """Показать информацию о текущем пользователе."""
-    user_id = message.from_user.id
-    
-    async with get_session_factory()() as session:
-        from sqlalchemy import select
-        result = await session.execute(select(User).where(User.user_id == user_id))
-        user = result.scalar_one_or_none()
-        
-        if user:
-            text = (
-                f"👤 <b>Ваша информация</b>\n\n"
-                f"ID: <code>{user.user_id}</code>\n"
-                f"Username: @{user.username or 'N/A'}\n"
-                f"Marzban: <code>{user.marzban_username or 'N/A'}</code>\n"
-                f"Баланс: {user.balance:.2f}₽\n"
-                f"Реф. баланс: {user.referral_balance:.2f}₽\n"
-                f"Триал: {'Использован' if user.is_trial_used else 'Доступен'}\n"
-            )
-            
-            if user.expire_date:
-                from datetime import datetime
-                days_left = (user.expire_date - datetime.utcnow()).days
-                text += f"Подписка: {'Активна' if days_left > 0 else 'Истекла'} ({days_left} дн.)\n"
-            
-            await message.answer(text)
-        else:
-            await message.answer("❌ Вы ещё не зарегистрированы. Нажмите /start")
-            
-    logger.info(f"Пользователь {user_id} запросил информацию о себе")
-
-
-@dp.message(Command("me"))
-async def cmd_me(message: Message):
-    """Показать информацию о текущем пользователе."""
-    user_id = message.from_user.id
-    
-    async with get_session_factory()() as session:
-        from sqlalchemy import select
-        result = await session.execute(select(User).where(User.user_id == user_id))
-        user = result.scalar_one_or_none()
-        
-        if user:
-            text = (
-                f"👤 <b>Ваша информация</b>\n\n"
-                f"ID: <code>{user.user_id}</code>\n"
-                f"Username: @{user.username or 'N/A'}\n"
-                f"Marzban: <code>{user.marzban_username or 'N/A'}</code>\n"
-                f"Баланс: {user.balance:.2f}₽\n"
-                f"Реф. баланс: {user.referral_balance:.2f}₽\n"
-                f"Триал: {'Использован' if user.is_trial_used else 'Доступен'}\n"
-            )
-            
-            if user.expire_date:
-                from datetime import datetime
-                days_left = (user.expire_date - datetime.utcnow()).days
-                text += f"Подписка: {'Активна' if days_left > 0 else 'Истекла'} ({days_left} дн.)\n"
-            
-            await message.answer(text)
-        else:
-            await message.answer("❌ Вы ещё не зарегистрированы. Нажмите /start")
-
-            
-    logger.info(f"Пользователь {user_id} запросил информацию о себе")
 
 
 @dp.message(Command("me"))
@@ -199,7 +125,7 @@ async def cmd_me(message: Message):
             
             if user.expire_date:
                 from datetime import datetime
-                days_left = (user - datetime.utcnow()).days
+                days_left = (user.expire_date - datetime.utcnow()).days
                 text += f"Подписка: {'Активна' if days_left > 0 else 'Истекла'} ({days_left} дн.)\n"
             
             await message.answer(text)
