@@ -13,8 +13,9 @@ def get_main_menu_keyboard(show_trial: bool = True) -> InlineKeyboardMarkup:
 
     Кнопки:
         Row 1: Мой профиль 👤 | Реферальная программа 👥
-        Row 2: Подписка 📦 (green) | Пробная подписка 🎁 (green, если show_trial=True)
-        Row 3: Купить подписку 🛒 | Помощь 🆘 (red)
+        Row 2: Подписка 📦 | Купить подписку 🛒
+        Row 3: Помощь 🆘 (red, по центру)
+        Row 4: Пробная подписка 🎁 (green, только если show_trial=True)
 
     Args:
         show_trial: Показывать ли кнопку пробной подписки
@@ -25,17 +26,19 @@ def get_main_menu_keyboard(show_trial: bool = True) -> InlineKeyboardMarkup:
     builder.button(text="Мой профиль 👤", callback_data="profile", style="primary")
     builder.button(text="Реферальная программа 👥", callback_data="referral", style="primary")
     
-    # Row 2: Зелёные кнопки
-    builder.button(text="Подписка 📦", callback_data="subscription", style="success")
+    # Row 2: Синие кнопки
+    builder.button(text="Подписка 📦", callback_data="subscription", style="primary")
+    builder.button(text="Купить подписку 🛒", callback_data="buy", style="primary")
+    
+    # Row 3: Красная кнопка по центру
+    builder.button(text="Помощь 🆘", callback_data="help", style="danger")
+    
+    # Row 4: Зелёная кнопка (только если нет активной подписки)
     if show_trial:
         builder.button(text="Пробная подписка 🎁", callback_data="trial", style="success")
-        builder.adjust(2, 2, 2)  # 3 ряда по 2 кнопки
+        builder.adjust(2, 2, 1, 1)  # 4 ряда
     else:
-        builder.adjust(2, 1, 1)  # 2 ряда по 2, потом 1 кнопка
-
-    # Row 3: Синяя и красная кнопки
-    builder.button(text="Купить подписку 🛒", callback_data="buy", style="primary")
-    builder.button(text="Помощь 🆘", callback_data="help", style="danger")
+        builder.adjust(2, 2, 1)  # 3 ряда
 
     return builder.as_markup()
 

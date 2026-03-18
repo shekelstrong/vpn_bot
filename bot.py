@@ -63,6 +63,10 @@ async def update_trial_command_for_user(user_id: int, has_active_subscription: b
     if not has_active_subscription:
         base_commands.insert(4, BotCommand(command="trial", description="Пробный период"))
 
+    # Для администраторов добавляем /admin
+    if user_id in settings.admin_ids_list:
+        base_commands.insert(0, BotCommand(command="admin", description="Админ-панель"))
+
     await bot.set_my_commands(
         base_commands,
         scope=BotCommandScopeChat(chat_id=user_id)

@@ -429,20 +429,13 @@ async def process_broadcast(message: types.Message, state: FSMContext):
         document_file_id=document_file_id,
         reply_markup=None
     )
-    
+
     # Показываем предпросмотр
     preview_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Отправить всем", callback_data="broadcast_confirm_send")],
         [InlineKeyboardButton(text="❌ Отменить", callback_data="broadcast_cancel")]
     ])
-    
-    await message.answer(
-        "📋 <b>Предпросмотр рассылки</b>\n\n"
-        "Это сообщение увидят все пользователи:\n\n"
-        "══════════════════════",
-        reply_markup=preview_keyboard
-    )
-    
+
     # Отправляем копию сообщения как предпросмотр
     try:
         if message_type == "photo":
@@ -453,13 +446,16 @@ async def process_broadcast(message: types.Message, state: FSMContext):
             await message.copy_to(chat_id=message.chat.id, reply_markup=preview_keyboard)
         else:
             await message.answer(
-                message.text or "Текстовое сообщение",
+                text=message.text or "Текстовое сообщение",
                 reply_markup=preview_keyboard
             )
     except Exception as e:
         logger.error(f"Ошибка при создании предпросмотра: {e}")
-        await message.answer("⚠️ Не удалось создать предпросмотр, но сообщение будет отправлено.", reply_markup=preview_keyboard)
-    
+        await message.answer(
+            text="⚠️ Не удалось создать предпросмотр, но сообщение будет отправлено.",
+            reply_markup=preview_keyboard
+        )
+
     await state.set_state(AdminPanel.waiting_for_broadcast_confirm)
 
 

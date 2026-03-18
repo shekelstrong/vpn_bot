@@ -33,27 +33,32 @@ def generate_qr(data: str) -> BufferedInputFile:
     return BufferedInputFile(bio.read(), filename="qr.png")
 
 
-async def send_trial_info(message: types.Message | types.CallbackQuery, vless_link: str):
-    """Отправить QR-код и ключ для пробной подписки."""
+async def send_trial_info(message: types.Message | types.CallbackQuery, subscription_url: str):
+    """Отправить Умную ссылку для пробной подписки."""
     if isinstance(message, types.CallbackQuery):
         message = message.message
 
-    qr_file = generate_qr(vless_link)
+    qr_file = generate_qr(subscription_url)
 
     success_text = (
         f"✅ <b>Ваш пробный период активен!</b>\n\n"
-        "🔑 <b>Ваш ключ (Прямая ссылка):</b>\n"
-        f"<code>{vless_link}</code>\n\n"
+        "🔗 <b>Ваша Умная ссылка:</b>\n"
+        f"<code>{subscription_url}</code>\n"
+        "<i>(Рекомендуется! Сама обновится при смене IP, скрыта от РКН)</i>\n\n"
         "📱 <b>Инструкция для iOS и Android:</b>\n"
         "1. Установите приложение <b>Hiddify</b> из магазина приложений.\n"
-        "2. Откройте приложение, нажмите <b>«+»</b> в правом верхнем углу.\n"
-        "3. Выберите <b>«Сканировать QR-код»</b> и наведите камеру на код из этого сообщения.\n"
+        "2. Откройте приложение и нажмите <b>«+»</b> в правом верхнем углу.\n"
+        "3. Нажмите <b>«Добавить из буфера обмена»</b> — ссылка скопируется автоматически при нажатии на неё выше.\n"
         "4. Нажмите огромную круглую кнопку для подключения.\n\n"
         "💻 <b>Инструкция для Windows и Mac:</b>\n"
         "1. Скачайте Hiddify и откройте его.\n"
-        "2. Нажмите на текст ключа выше, чтобы скопировать его.\n"
-        "3. В приложении нажмите <b>«+»</b> -> <b>«Добавить из буфера обмена»</b>.\n\n"
-        "⏰ <b>Ваш триал действует 24 часа!</b>"
+        "2. Нажмите на текст ссылки выше, чтобы скопировать её.\n"
+        "3. В приложении нажмите <b>«+»</b> → <b>«Добавить из буфера обмена»</b>.\n\n"
+        "📷 <b>Альтернативный способ (QR-код):</b>\n"
+        "Если вы активируете VPN на компьютере, можете отсканировать QR-код из этого сообщения через приложение на телефоне.\n\n"
+        "⏰ <b>Ваш триал действует 24 часа!</b>\n\n"
+        "⚠️ Не передавайте ссылку третьим лицам!\n\n"
+        "Если возникнут проблемы с подключением, напишите в поддержку по кнопке «Помощь 🆘» из главного меню."
     )
 
     await message.answer_photo(
@@ -116,11 +121,13 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
                 await session.commit()
                 logger.info(f"Пересоздан аккаунт Marzban для пользователя {user_id} с триалом")
 
-            links = marzban_data.get("links", [])
-            vless_link = links[0] if links else ""
+            subscription_url = marzban_data.get("subscription_url", "")
+            if subscription_url and subscription_url.startswith("/"):
+                base_url = settings.MARZBAN_URL.rstrip("/")
+                subscription_url = f"{base_url}{subscription_url}"
 
-            if vless_link:
-                await send_trial_info(message, vless_link)
+            if subscription_url:
+                await send_trial_info(message, subscription_url)
             else:
                 await message.answer(
                     "❌ Не удалось получить ссылку на подписку.\n\n"
@@ -241,14 +248,16 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
         user.expire_date = datetime.utcnow() + timedelta(hours=int(trial_hours))
         await session.commit()
 
-        links = marzban_data.get("links", [])
-        vless_link = links[0] if links else ""
+        subscription_url = marzban_data.get("subscription_url", "")
+        if subscription_url and subscription_url.startswith("/"):
+            base_url = settings.MARZBAN_URL.rstrip("/")
+            subscription_url = f"{base_url}{subscription_url}"
 
-        if not vless_link:
-            await callback.message.answer("❌ Ошибка генерации ключа сервером.")
+        if not subscription_url:
+            await callback.message.answer("❌ Ошибка генерации ссылки сервером.")
             return
 
-        await send_trial_info(callback.message, vless_link)
+        await send_trial_info(callback.message, subscription_url)
 
         logger.info(f"Активирован триал для пользователя {user_id}")
 
