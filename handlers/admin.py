@@ -3,6 +3,7 @@
 Управление пользователями, статистика, рассылки.
 """
 
+import asyncio
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -73,41 +74,41 @@ async def admin_stats(callback: types.CallbackQuery, session: AsyncSession):
     
     try:
         # Общая статистика пользователей
-        total_users = await session.execute(select(func.count(User.user_id)))
-        total_users = total_users.scalar()
+        res_total = await session.execute(select(func.count(User.user_id)))
+        total_users = res_total.scalar()
         
         # Активные пользователи (с подпиской)
         now = datetime.utcnow()
-        active_users = await session.execute(
+        res_active = await session.execute(
             select(func.count(User.user_id)).where(User.expire_date > now)
         )
-        active_users = active_users.scalar()
+        active_users = res_active.scalar()
         
         # Пользователи с триалом
-        trial_users = await session.execute(
+        res_trial = await session.execute(
             select(func.count(User.user_id)).where(User.is_trial_used == True)
         )
-        trial_users = trial_users.scalar()
+        trial_users = res_trial.scalar()
         
         # Общая выручка
-        total_revenue = await session.execute(
+        res_revenue = await session.execute(
             select(func.sum(Transaction.amount)).where(Transaction.status == "paid")
         )
-        total_revenue = total_revenue.scalar() or 0
+        total_revenue = res_revenue.scalar() or 0
         
         # Активные счета
-        pending_invoices = await session.execute(
+        res_invoices = await session.execute(
             select(func.count(PaymentInvoice.id)).where(
                 PaymentInvoice.status == "pending"
             )
         )
-        pending_invoices = pending_invoices.scalar()
+        pending_invoices = res_invoices.scalar()
         
         # Рефералы
-        users_with_referrals = await session.execute(
+        res_refs = await session.execute(
             select(func.count(User.user_id)).where(User.referrer_id.isnot(None))
         )
-        users_with_referrals = users_with_referrals.scalar()
+        users_with_referrals = res_refs.scalar()
         
         stats_text = (
             "📊 <b>Статистика Nemo VPN</b>\n\n"
@@ -222,13 +223,14 @@ async def process_user_search(message: types.Message, state: FSMContext, session
             )
             return
         
-        # Получаем информацию о пользователе
+        # Получаем информацию о пользователе (добавили реф. баланс)
         user_info = (
             f"👤 <b>Информация о пользователе</b>\n\n"
             f"<b>ID:</b> <code>{user.user_id}</code>\n"
             f"<b>Username:</b> @{user.username if user.username else 'N/A'}\n"
             f"<b>Marzban:</b> <code>{user.marzban_username or 'N/A'}</code>\n\n"
             f"<b>Баланс:</b> {user.balance:.2f}₽\n"
+            f"<b>Реф. баланс:</b> {user.referral_balance:.2f}₽\n"
             f"<b>Триал:</b> {'Использован' if user.is_trial_used else 'Не использован'}\n\n"
         )
         
@@ -247,10 +249,10 @@ async def process_user_search(message: types.Message, state: FSMContext, session
             user_info += f"<b>Реферер:</b> <code>{user.referrer_id}</code>\n"
         
         # Получаем количество рефералов
-        referrals = await session.execute(
+        referrals_res = await session.execute(
             select(func.count(User.user_id)).where(User.referrer_id == user.user_id)
         )
-        referral_count = referrals.scalar()
+        referral_count = referrals_res.scalar()
         user_info += f"<b>Рефералов:</b> {referral_count}\n"
         
         await message.answer(
@@ -420,32 +422,8 @@ async def process_broadcast(message: types.Message, state: FSMContext, session: 
         # Копируем сообщение каждому пользователю
         for user_id in user_ids:
             try:
-                if message.photo:
-                    await message.bot.send_photo(
-                        chat_id=user_id,
-                        photo=message.photo[-1].file_id,
-                        caption=message.caption,
-                    )
-                elif message.video:
-                    await message.bot.send_video(
-                        chat_id=user_id,
-                        video=message.video.file_id,
-                        caption=message.caption,
-                    )
-                elif message.document:
-                    await message.bot.send_document(
-                        chat_id=user_id,
-                        document=message.document.file_id,
-                        caption=message.caption,
-                    )
-                else:
-                    await message.bot.send_message(
-                        chat_id=user_id,
-                        text=message.text or message.caption or "",
-                    )
-                
+                await message.copy_to(chat_id=user_id)
                 success_count += 1
-                
             except Exception as e:
                 logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
                 fail_count += 1
@@ -502,11 +480,7 @@ async def admin_close(callback: types.CallbackQuery):
 async def cmd_cancel(message: types.Message, state: FSMContext):
     """Отмена текущего действия."""
     await state.clear()
-    await message.answer(a
+    await message.answer(
         "❌ Отменено.\n\nВыберите действие:",
         reply_markup=get_admin_keyboard() if is_admin(message.from_user.id) else get_main_menu_keyboard(),
     )
-
-
-# Импортируем asyncio в конце
-import asyncio
