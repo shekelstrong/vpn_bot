@@ -208,7 +208,6 @@ async def process_user_search(message: types.Message, state: FSMContext, session
                 select(User).where(User.user_id == user_id)
             )
         else:
-            # Удаляем @ если есть
             username = search_value.lstrip("@")
             result = await session.execute(
                 select(User).where(User.username == username)
@@ -223,7 +222,7 @@ async def process_user_search(message: types.Message, state: FSMContext, session
             )
             return
         
-        # Получаем информацию о пользователе (добавили реф. баланс)
+        # Получаем информацию о пользователе
         user_info = (
             f"👤 <b>Информация о пользователе</b>\n\n"
             f"<b>ID:</b> <code>{user.user_id}</code>\n"
@@ -248,7 +247,6 @@ async def process_user_search(message: types.Message, state: FSMContext, session
         if user.referrer_id:
             user_info += f"<b>Реферер:</b> <code>{user.referrer_id}</code>\n"
         
-        # Получаем количество рефералов
         referrals_res = await session.execute(
             select(func.count(User.user_id)).where(User.referrer_id == user.user_id)
         )
@@ -281,7 +279,6 @@ async def process_user_search(message: types.Message, state: FSMContext, session
 async def admin_gift_sub_start(callback: types.CallbackQuery, state: FSMContext):
     """Начало процесса выдачи подарочной подписки."""
     if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
         return
     
     user_id = callback.data.split(":")[1]
