@@ -89,7 +89,7 @@ async def get_db_setting(session: AsyncSession, key: str, default: str = "") -> 
     from database.models import BotSettings
     from sqlalchemy import select
     
-    result = await session.execute(select(BotSettings).where(BotSettings.key == key))
+    result = await session.execute(select(BotSettings).filter(BotSettings.key == key))
     setting = result.scalar_one_or_none()
     return setting.value if setting else default
 
@@ -109,18 +109,16 @@ async def update_db_setting(session: AsyncSession, key: str, value: str, descrip
     from database.models import BotSettings
     from sqlalchemy import select
     
-    result = await session.execute(select(BotSettings).where(BotSettings.key == key))
+    result = await session.execute(select(BotSettings).filter(BotSettings.key == key))
     setting = result.scalar_one_or_none()
     
     if setting:
         setting.value = value
-        if description:
-            setting.description = description
+        setting.description = description
+        await session.commit()
     else:
-        setting = BotSettings(key=key, value=value, description=description)
-        session.add(setting)
-    
-    await session.commit()
+        session.add(BotSettings(key=key, value=value, description=description))
+        await session.commit()
 
 
 async def init_default_settings(session: AsyncSession) -> None:
@@ -162,9 +160,6 @@ async def calculate_tariff_price(session: AsyncSession, base_price: float, month
     
     return round(final_price, 2)
 
-
-from database.models import BotSettings
-from sqlalchemy import select
 
 # Глобальный экземпляр настроек
 settings = Settings()
