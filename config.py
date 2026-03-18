@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 from pydantic import Field
-from typing import List
+from typing import List, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 
 class Settings(BaseSettings):
     """Основные настройки бота."""
@@ -31,6 +32,7 @@ class Settings(BaseSettings):
 
     # Referral system
     REFERRAL_PERCENTAGES: str = Field(default="15,10,5", description="Проценты реферальной системы (уровень 1,2,3)")
+    REFERRAL_MIN_WITHDRAW: int = Field(default=1000, description="Минимальная сумма вывода (рублей)")
 
     # VLESS Reality настройки
     VLESS_PORT: int = Field(default=8444, description="Порт VLESS Reality")
@@ -59,7 +61,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
-        extra = "ignore" # Добавлено правило игнорировать любые другие переменные из .env, чтобы бот больше не падал из-за них
+        extra = "ignore"
 
     @property
     def admin_ids_list(self) -> List[int]:
@@ -80,6 +82,70 @@ class Settings(BaseSettings):
     def marzban_api_url(self) -> str:
         """Возвращает полный URL API Marzban."""
         return f"{self.MARZBAN_URL}/api"
+
+
+async def get_db_setting(session: AsyncSession, key: str, default: str = "") -> str:
+    """Получить настройку из БД."""
+    from database.models import BotSettings
+    from sqlalchemy import select
+    
+    result = await session.execute(select(BotSettings).where(BotSettings.key == key))
+    setting = result.scalar_one_or_none()
+    return setting.value if setting else default
+
+
+async def get_db_settings_dict(session: AsyncSession) -> dict:
+    """Получить все настройки из БД."""
+    from database.models import BotSettings
+    from sqlalchemy import select
+    
+    result = await session.execute(select(BotSettings))
+    settings = result.scalars().all()
+    return {s.key: s.value for s in settings}
+
+
+async def update_db_setting(session: AsyncSession, key: str, value: str, description: Optional[str] = None) -> None:
+    """Обновить или создать настройку в БД."""
+    from database.models import BotSettings
+    from sqlalchemy import select
+    
+    result = await session.execute(select(BotSettings).where(BotSettings.key == key))
+    setting = result.scalar_one_or_none()
+    
+    if setting:
+        setting.value = value
+        if description:
+            setting.description = description
+    else:
+        setting = BotSettings(key=key, value=value, description=description)
+        session.add(setting)
+    
+    await session.commit()
+
+
+async def init_default_settings(session: AsyncSession) -> None:
+    """Инициализация дефолтных настроек в БД."""
+    defaults = {
+        "subscription_price": ("100", "Цена подписки в рублях"),
+        "subscription_duration": ("30", "Базовый срок подписки в днях"),
+        "trial_hours": ("24", "Срок действия триала в часах"),
+        "trial_data_limit": ("1", "Лимит трафика для триала в GB"),
+        "referral_level1": ("15", "Процент рефералов уровня 1"),
+        "referral_level2": ("10", "Процент рефералов уровня 2"),
+        "referral_level3": ("5", "Процент рефералов уровня 3"),
+        "referral_min_withdraw": ("1000", "Минимальная сумма вывода в рублях"),
+    }
+    
+    for key, (value, desc) in defaults.items():
+        result = await session.execute(select(BotSettings).where(BotSettings.key == key))
+        if not result.scalar_one_or_none():
+            session.add(BotSettings(key=key, value=value, description=desc))
+    
+    await session.commit()
+
+
+from database.models import BotSettings
+from sqlalchemy import select
 
 # Глобальный экземпляр настроек
 settings = Settings()

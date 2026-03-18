@@ -24,10 +24,10 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, BotCommand, BotCommandScopeDefault
 from loguru import logger
 
-from config import settings
+from config import settings, init_default_settings
 from database.engine import init_db, close_db, get_session_factory
 from database.models import User
 from services.marzban_api import marzban_service
@@ -40,6 +40,7 @@ from handlers.trial import router as trial_router
 from handlers.buy import router as buy_router
 from handlers.help import router as help_router
 from handlers.admin import router as admin_router
+from handlers.admin.settings import router as admin_settings_router
 from handlers.referrals import router as referrals_router
 
 
@@ -91,6 +92,7 @@ dp.include_router(trial_router)
 dp.include_router(buy_router)
 dp.include_router(help_router)
 dp.include_router(admin_router)
+dp.include_router(admin_settings_router)
 dp.include_router(referrals_router)
 
 
@@ -139,6 +141,11 @@ async def on_startup():
     await init_db()
     logger.info("База данных инициализирована")
     
+    # Инициализация дефолтных настроек
+    async with get_session_factory()() as session:
+        await init_default_settings(session)
+    logger.info("Дефолтные настройки инициализированы")
+    
     # Инициализация планировщика
     scheduler = create_scheduler(bot, get_session_factory())
     await scheduler.start()
@@ -151,6 +158,19 @@ async def on_startup():
     # Информация об администраторах
     admin_count = len(settings.admin_ids_list)
     logger.info(f"Зарегистрировано администраторов: {admin_count}")
+    
+    # Установка кнопки меню
+    commands = [
+        BotCommand(command="start", description="Главное меню"),
+        BotCommand(command="me", description="Мой профиль"),
+        BotCommand(command="buy", description="Купить подписку"),
+        BotCommand(command="trial", description="Бесплатный триал"),
+        BotCommand(command="referral", description="Реферальная программа"),
+        BotCommand(command="help", description="Помощь"),
+        BotCommand(command="admin", description="Админ-панель"),
+    ]
+    await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+    logger.info("Кнопка меню настроена")
     
     logger.info("=" * 50)
     logger.info("Nemo VPN Bot готов к работе!")

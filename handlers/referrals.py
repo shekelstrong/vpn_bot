@@ -58,7 +58,7 @@ async def show_referral_main_menu(callback: CallbackQuery, session: AsyncSession
         f"• Уровень 1: <b>15%</b> от покупок приглашенных\n"
         f"• Уровень 2: <b>10%</b> от покупок друзей ваших друзей\n"
         f"• Уровень 3: <b>5%</b> от покупок на третьем уровне\n\n"
-        f"Минимальная сумма вывода: <b>50₽</b>"
+        f"Минимальная сумма вывода: <b>1000 руб.</b>"
     )
     
     await callback.message.edit_text(text, reply_markup=get_referral_keyboard(), parse_mode="HTML")
@@ -146,8 +146,8 @@ async def cancel_withdraw(callback: CallbackQuery, state: FSMContext):
 async def start_withdraw(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     user = await session.scalar(select(User).where(User.user_id == callback.from_user.id))
     
-    if user.referral_balance < 50:
-        await callback.answer("❌ Минимальная сумма вывода: 50₽", show_alert=True)
+    if user.referral_balance < 1000:
+        await callback.answer("❌ Минимальная сумма вывода: 1000 руб.", show_alert=True)
         return
         
     await state.set_state(WithdrawStates.waiting_for_amount)
@@ -168,8 +168,8 @@ async def process_withdraw_amount(message: Message, session: AsyncSession, state
 
     user = await session.scalar(select(User).where(User.user_id == message.from_user.id))
     
-    if amount < 50:
-        await message.answer("❌ Минимальная сумма вывода: 50₽", reply_markup=cancel_kb())
+    if amount < 1000:
+        await message.answer("❌ Минимальная сумма вывода: 1000 руб.", reply_markup=cancel_kb())
         return
     if amount > user.referral_balance:
         await message.answer(f"❌ На вашем реферальном балансе недостаточно средств (максимум {user.referral_balance:.2f}₽).", reply_markup=cancel_kb())

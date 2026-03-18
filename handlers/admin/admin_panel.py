@@ -442,20 +442,7 @@ async def process_broadcast(message: types.Message, state: FSMContext, session: 
     await state.clear()
 
 
-@router.callback_query(F.data == "admin_settings")
-async def admin_settings(callback: types.CallbackQuery):
-    """Настройки (заглушка)."""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ Нет доступа", show_alert=True)
-        return
-    
-    await callback.message.answer(
-        "⚙️ <b>Настройки</b>\n\n"
-        "Раздел в разработке.\n\n"
-        "Здесь будут настройки бота."
-    )
-    
-    await callback.answer()
+
 
 
 @router.callback_query(F.data == "admin_close")
