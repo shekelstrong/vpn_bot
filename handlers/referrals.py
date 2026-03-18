@@ -37,6 +37,62 @@ def cancel_kb() -> InlineKeyboardMarkup:
 
 # ==================== МЕНЮ РЕФЕРАЛОВ ====================
 
+@router.callback_query(F.data == "referral")
+async def show_referral_main_menu(callback: CallbackQuery, session: AsyncSession):
+    """Показать главное меню реферальной системы."""
+    from keyboards.inline import get_referral_keyboard
+    
+    user_id = callback.from_user.id
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        await callback.answer("Ошибка: пользователь не найден", show_alert=True)
+        return
+    
+    text = (
+        f"👥 <b>Реферальная программа</b>\n\n"
+        f"Приглашайте друзей и получайте <b>до 15%</b> от их покупок!\n\n"
+        f"💰 <b>Ваш реферальный баланс:</b> {user.referral_balance:.2f}₽\n\n"
+        f"<b>Условия:</b>\n"
+        f"• Уровень 1: <b>15%</b> от покупок приглашенных\n"
+        f"• Уровень 2: <b>10%</b> от покупок друзей ваших друзей\n"
+        f"• Уровень 3: <b>5%</b> от покупок на третьем уровне\n\n"
+        f"Минимальная сумма вывода: <b>50₽</b>"
+    )
+    
+    await callback.message.edit_text(text, reply_markup=get_referral_keyboard(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "referral_invite")
+async def show_referral_link(callback: CallbackQuery, session: AsyncSession):
+    """Показать реферальную ссылку для приглашения друзей."""
+    user_id = callback.from_user.id
+    bot_info = await callback.bot.get_me()
+    ref_link = f"https://t.me/{bot_info.username}?start={user_id}"
+    
+    from keyboards.inline import get_back_keyboard
+    
+    text = (
+        f"🔗 <b>Ваша реферальная ссылка</b>\n\n"
+        f"<code>{ref_link}</code>\n\n"
+        f"📢 <b>Как это работает:</b>\n"
+        f"1. Поделитесь ссылкой с другом\n"
+        f"2. Друг переходит по ссылке и регистрируется\n"
+        f"3. Друг покупает подписку\n"
+        f"4. Вы получаете <b>15%</b> на свой баланс!\n\n"
+        f"💡 <b>Подсказка:</b>\n"
+        f"Нажмите на ссылку, чтобы скопировать её в буфер обмена"
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Поделиться ссылкой", url=f"https://t.me/share/url?url={ref_link}")],
+        [InlineKeyboardButton(text="Назад ↩️", callback_data="referral")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
 @router.callback_query(F.data == "referral_stats")
 async def show_referral_menu(callback: CallbackQuery, session: AsyncSession):
     user_id = callback.from_user.id

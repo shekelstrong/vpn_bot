@@ -15,6 +15,7 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
         - Мой профиль 👤
         - Купить подписку 📦
         - Бесплатный триал 🎁
+        - Реферальная программа 👥
         - Помощь 🆘
     """
     builder = InlineKeyboardBuilder()
@@ -22,9 +23,10 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="Мой профиль 👤", callback_data="profile")
     builder.button(text="Купить подписку 📦", callback_data="buy")
     builder.button(text="Бесплатный триал 🎁", callback_data="trial")
+    builder.button(text="Реферальная программа 👥", callback_data="referral")
     builder.button(text="Помощь 🆘", callback_data="help")
     
-    builder.adjust(2, 2)  # 2 кнопки в ряду
+    builder.adjust(2, 2, 1)  # 2 кнопки в ряду, потом 1
     return builder.as_markup()
 
 
@@ -44,6 +46,7 @@ def get_profile_keyboard(
     if show_link and has_subscription:
         builder.button(text="Получить ссылку 🔗", callback_data="get_vless_link")
     
+    builder.button(text="Реферальная программа 👥", callback_data="referral")
     builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     if has_subscription:
@@ -60,12 +63,14 @@ def get_buy_keyboard() -> InlineKeyboardMarkup:
     Кнопки:
         - CryptoBot (USDT/TON) 💰
         - Банковская карта 🏦
+        - Реферальная программа 👥
         - Назад ↩️
     """
     builder = InlineKeyboardBuilder()
     
     builder.button(text="CryptoBot (USDT/TON) 💰", callback_data="pay_crypto")
     builder.button(text="Банковская карта 🏦", callback_data="pay_card")
+    builder.button(text="Оплатить с реферального баланса 💰", callback_data="referral")
     builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     builder.adjust(1, 1)
@@ -97,6 +102,7 @@ def get_trial_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
     builder.button(text="Активировать триал 🚀", callback_data="activate_trial")
+    builder.button(text="Реферальная программа 👥", callback_data="referral")
     builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     builder.adjust(1, 1)
@@ -111,6 +117,7 @@ def get_help_keyboard() -> InlineKeyboardMarkup:
     
     builder.button(text="Как настроить Hiddify 📱", callback_data="help_hiddify")
     builder.button(text="Частые вопросы ❓", callback_data="help_faq")
+    builder.button(text="Реферальная программа 👥", callback_data="referral")
     builder.button(text="Техподдержка 💬", callback_data="help_support")
     builder.button(text="Политика конфиденциальности 📜", url="https://telegra.ph/Politika-konfidencialnosti-08-15-17")
     builder.button(text="Пользовательское соглашение 📝", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-15-10")
@@ -144,7 +151,7 @@ def get_referral_keyboard() -> InlineKeyboardMarkup:
     
     builder.button(text="Пригласить друга 👥", callback_data="referral_invite")
     builder.button(text="Мои рефералы 📊", callback_data="referral_stats")
-    builder.button(text="Вывод баланса 💸", callback_data="referral_withdraw")
+    builder.button(text="Вывод баланса 💸", callback_data="start_withdraw")
     builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     builder.adjust(2, 2)
