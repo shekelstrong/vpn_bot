@@ -3,7 +3,7 @@
 """
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-from aiogram.utils.keyboard import InlineKeyboardBuilder, KeyboardButtonRequestUser
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import Optional, List
 
 
@@ -20,10 +20,10 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Мой профиль 👤", callback_data="profile", color="primary")
-    builder.button(text="Купить подписку 📦", callback_data="buy", color="primary")
-    builder.button(text="Бесплатный триал 🎁", callback_data="trial", color="positive")
-    builder.button(text="Реферальная программа 👥", callback_data="referral", color="primary")
+    builder.button(text="Мой профиль 👤", callback_data="profile")
+    builder.button(text="Купить подписку 📦", callback_data="buy")
+    builder.button(text="Бесплатный триал 🎁", callback_data="trial")
+    builder.button(text="Реферальная программа 👥", callback_data="referral")
     builder.button(text="Помощь 🆘", callback_data="help")
     
     builder.adjust(2, 2, 1)  # 2 кнопки в ряду, потом 1
@@ -44,13 +44,13 @@ def get_profile_keyboard(
     builder = InlineKeyboardBuilder()
     
     if show_link and has_subscription:
-        builder.button(text="Получить ссылку 🔗", callback_data="get_vless_link", color="primary")
+        builder.button(text="Получить ссылку 🔗", callback_data="get_vless_link")
     
-    builder.button(text="Реферальная программа 👥", callback_data="referral", color="primary")
-    builder.button(text="Назад ↩️", callback_data="back_to_main", color="secondary")
+    builder.button(text="Реферальная программа 👥", callback_data="referral")
+    builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     if has_subscription:
-        builder.button(text="Продлить подписку 💳", callback_data="buy_extend", color="primary")
+        builder.button(text="Продлить подписку 💳", callback_data="buy_extend")
     
     builder.adjust(1, 1)
     return builder.as_markup()
@@ -68,10 +68,10 @@ def get_buy_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="CryptoBot (USDT/TON) 💰", callback_data="pay_crypto", color="primary")
-    builder.button(text="Банковская карта 🏦", callback_data="pay_card", color="primary")
-    builder.button(text="Оплатить с реферального баланса 💰", callback_data="referral", color="primary")
-    builder.button(text="Назад ↩️", callback_data="back_to_main", color="secondary")
+    builder.button(text="CryptoBot (USDT/TON) 💰", callback_data="pay_crypto")
+    builder.button(text="Банковская карта 🏦", callback_data="pay_card")
+    builder.button(text="Оплатить с реферального баланса 💰", callback_data="referral")
+    builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     builder.adjust(1, 1)
     return builder.as_markup()
@@ -87,9 +87,9 @@ def get_payment_keyboard(invoice_url: str, invoice_id: str) -> InlineKeyboardMar
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Оплатить 💳", url=invoice_url, color="primary")
-    builder.button(text="Проверить оплату ✅", callback_data=f"check_payment:{invoice_id}", color="positive")
-    builder.button(text="Отмена ❌", callback_data="cancel_payment", color="secondary")
+    builder.button(text="Оплатить 💳", url=invoice_url)
+    builder.button(text="Проверить оплату ✅", callback_data=f"check_payment:{invoice_id}")
+    builder.button(text="Отмена ❌", callback_data="cancel_payment")
     
     builder.adjust(1, 1)
     return builder.as_markup()
@@ -101,9 +101,9 @@ def get_trial_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Активировать триал 🚀", callback_data="activate_trial", color="positive")
-    builder.button(text="Реферальная программа 👥", callback_data="referral", color="primary")
-    builder.button(text="Назад ↩️", callback_data="back_to_main", color="secondary")
+    builder.button(text="Активировать триал 🚀", callback_data="activate_trial")
+    builder.button(text="Реферальная программа 👥", callback_data="referral")
+    builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     builder.adjust(1, 1)
     return builder.as_markup()
@@ -115,13 +115,13 @@ def get_help_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Как настроить Hiddify 📱", callback_data="help_hiddify", color="primary")
-    builder.button(text="Частые вопросы ❓", callback_data="help_faq", color="primary")
-    builder.button(text="Реферальная программа 👥", callback_data="referral", color="primary")
-    builder.button(text="Техподдержка 💬", callback_data="help_support", color="primary")
+    builder.button(text="Как настроить Hiddify 📱", callback_data="help_hiddify")
+    builder.button(text="Частые вопросы ❓", callback_data="help_faq")
+    builder.button(text="Реферальная программа 👥", callback_data="referral")
+    builder.button(text="Техподдержка 💬", callback_data="help_support")
     builder.button(text="Политика конфиденциальности 📜", url="https://telegra.ph/Politika-konfidencialnosti-08-15-17")
     builder.button(text="Пользовательское соглашение 📝", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-15-10")
-    builder.button(text="Назад ↩️", callback_data="back_to_main", color="secondary")
+    builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     # adjust(1) выстроит все кнопки строго друг под другом (в 1 столбец)
     builder.adjust(1)
@@ -134,10 +134,10 @@ def get_hiddify_instruction_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Скачать для Android 📱", url="https://play.google.com/store/apps/details?id=app.hiddify.com", color="primary")
-    builder.button(text="Скачать для iOS 🍎", url="https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532", color="primary")
-    builder.button(text="Скачать для Windows 💻", url="https://github.com/hiddify/hiddify-next/releases", color="primary")
-    builder.button(text="Назад ↩️", callback_data="help", color="secondary")
+    builder.button(text="Скачать для Android 📱", url="https://play.google.com/store/apps/details?id=app.hiddify.com")
+    builder.button(text="Скачать для iOS 🍎", url="https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532")
+    builder.button(text="Скачать для Windows 💻", url="https://github.com/hiddify/hiddify-next/releases")
+    builder.button(text="Назад ↩️", callback_data="help")
     
     builder.adjust(1, 1)
     return builder.as_markup()
@@ -149,10 +149,10 @@ def get_referral_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Пригласить друга 👥", callback_data="referral_invite", color="primary")
-    builder.button(text="Мои рефералы 📊", callback_data="referral_stats", color="primary")
-    builder.button(text="Вывод баланса 💸", callback_data="start_withdraw", color="positive")
-    builder.button(text="Назад ↩️", callback_data="back_to_main", color="secondary")
+    builder.button(text="Пригласить друга 👥", callback_data="referral_invite")
+    builder.button(text="Мои рефералы 📊", callback_data="referral_stats")
+    builder.button(text="Вывод баланса 💸", callback_data="start_withdraw")
+    builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     builder.adjust(2, 2)
     return builder.as_markup()
@@ -164,11 +164,11 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Статистика 📊", callback_data="admin_stats", color="primary")
-    builder.button(text="Пользователи 👥", callback_data="admin_users", color="primary")
-    builder.button(text="Рассылка 📢", callback_data="admin_broadcast", color="primary")
-    builder.button(text="Настройки ⚙️", callback_data="admin_settings", color="primary")
-    builder.button(text="Закрыть панель 🔒", callback_data="admin_close", color="secondary")
+    builder.button(text="Статистика 📊", callback_data="admin_stats")
+    builder.button(text="Пользователи 👥", callback_data="admin_users")
+    builder.button(text="Рассылка 📢", callback_data="admin_broadcast")
+    builder.button(text="Настройки ⚙️", callback_data="admin_settings")
+    builder.button(text="Закрыть панель 🔒", callback_data="admin_close")
     
     builder.adjust(2, 2, 1)
     return builder.as_markup()
@@ -180,9 +180,9 @@ def get_admin_user_search_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Найти по ID 🔍", callback_data="admin_find_by_id", color="primary")
-    builder.button(text="Найти по username 👤", callback_data="admin_find_by_username", color="primary")
-    builder.button(text="Назад ↩️", callback_data="admin_panel", color="secondary")
+    builder.button(text="Найти по ID 🔍", callback_data="admin_find_by_id")
+    builder.button(text="Найти по username 👤", callback_data="admin_find_by_username")
+    builder.button(text="Назад ↩️", callback_data="admin_panel")
     
     builder.adjust(1, 1)
     return builder.as_markup()
@@ -203,8 +203,8 @@ def get_yes_no_keyboard(
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="✅ Да", callback_data=yes_callback, color="positive")
-    builder.button(text="❌ Нет", callback_data=no_callback, color="secondary")
+    builder.button(text="✅ Да", callback_data=yes_callback)
+    builder.button(text="❌ Нет", callback_data=no_callback)
     
     builder.adjust(2)
     return builder.as_markup()
@@ -216,11 +216,11 @@ def get_subscription_duration_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="1 месяц - 100₽", callback_data="duration_1month", color="primary")
-    builder.button(text="3 месяца - 270₽", callback_data="duration_3month", color="primary")
-    builder.button(text="6 месяцев - 500₽", callback_data="duration_6month", color="primary")
-    builder.button(text="12 месяцев - 900₽", callback_data="duration_12month", color="primary")
-    builder.button(text="Назад ↩️", callback_data="back_to_main", color="secondary")
+    builder.button(text="1 месяц - 100₽", callback_data="duration_1month")
+    builder.button(text="3 месяца - 270₽", callback_data="duration_3month")
+    builder.button(text="6 месяцев - 500₽", callback_data="duration_6month")
+    builder.button(text="12 месяцев - 900₽", callback_data="duration_12month")
+    builder.button(text="Назад ↩️", callback_data="back_to_main")
     
     builder.adjust(1, 1)
     return builder.as_markup()
@@ -231,5 +231,5 @@ def get_back_keyboard() -> InlineKeyboardMarkup:
     Простая клавиатура с кнопкой Назад.
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text="Назад ↩️", callback_data="back_to_main", color="secondary")
+    builder.button(text="Назад ↩️", callback_data="back_to_main")
     return builder.as_markup()
