@@ -88,14 +88,16 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
         
         text += f"▫️ {period['days']} дней — {int(price)}₽{discount_text}\n"
     
-    await message.answer(
-        text=text,
+    await message.answer_video(
+        video="оплата.mov",
+        caption=text,
         reply_markup=get_subscription_duration_keyboard(
             price_1m=prices.get("1month", base_price),
             price_3m=prices.get("3month", base_price * 3),
             price_6m=prices.get("6month", base_price * 6),
             price_12m=prices.get("12month", base_price * 12)
-        )
+        ),
+        parse_mode="HTML"
     )
 
 @router.callback_query(F.data.startswith("duration"))
