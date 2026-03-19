@@ -187,22 +187,6 @@ async def show_profile_menu(message: Message, session: AsyncSession):
     )
 
 
-@router.message(F.text.startswith("Купить подписку"))
-async def show_buy_menu(message: Message, session: AsyncSession):
-    """Показать меню покупки."""
-    user_id = message.from_user.id
-    result = await session.execute(select(User).where(User.user_id == user_id))
-    user = result.scalar_one_or_none()
-    
-    has_active_subscription = user.expire_date and user.expire_date > datetime.utcnow() if user else False
-    show_trial = not has_active_subscription and not user.is_trial_used if user else True
-    
-    await message.answer(
-        text="Магазин подписок\n\nВыберите тариф:",
-        reply_markup=get_main_menu_keyboard(show_trial=show_trial),
-    )
-
-
 @router.message(F.text.startswith("Пробная подписка"))
 async def show_trial_menu(message: Message, session: AsyncSession):
     """Показать меню пробной подписки."""
