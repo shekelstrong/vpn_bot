@@ -61,7 +61,7 @@ async def show_referral_main_menu(callback: CallbackQuery, session: AsyncSession
         f"Минимальная сумма вывода: <b>1000 руб.</b>"
     )
     
-    await callback.message.edit_text(text, reply_markup=get_referral_keyboard(), parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=get_referral_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "referral_invite")
@@ -95,7 +95,7 @@ async def show_referral_link(callback: CallbackQuery, session: AsyncSession):
         [InlineKeyboardButton(text="Назад ↩️", callback_data="referral")]
     ])
     
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(F.data == "referral_stats")
@@ -138,14 +138,14 @@ async def show_referral_menu(callback: CallbackQuery, session: AsyncSession):
         [InlineKeyboardButton(text="Назад ↩️", callback_data="back_to_main")]
     ])
     
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await callback.message.edit_caption(caption=text, reply_markup=kb, parse_mode="HTML")
 
 # ==================== ПРОЦЕСС ВЫВОДА СРЕДСТВ ====================
 
 @router.callback_query(F.data == "cancel_withdraw")
 async def cancel_withdraw(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("❌ Вывод средств отменен.")
+    await callback.message.edit_caption(caption="❌ Вывод средств отменен.", parse_mode="HTML")
 
 @router.callback_query(F.data == "start_withdraw")
 async def start_withdraw(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
@@ -156,8 +156,8 @@ async def start_withdraw(callback: CallbackQuery, session: AsyncSession, state: 
         return
         
     await state.set_state(WithdrawStates.waiting_for_amount)
-    await callback.message.edit_text(
-        f"💰 Ваш реферальный баланс: <b>{user.referral_balance:.2f}₽</b>\n\n"
+    await callback.message.edit_caption(
+        caption=f"💰 Ваш реферальный баланс: <b>{user.referral_balance:.2f}₽</b>\n\n"
         f"Введите сумму, которую хотите вывести (числом):",
         reply_markup=cancel_kb(),
         parse_mode="HTML"
@@ -209,7 +209,7 @@ async def process_withdraw_method(callback: CallbackQuery, session: AsyncSession
                     await callback.bot.send_message(admin_id, f"ℹ️ Юзер {user.user_id} перевел {amount}₽ с реф. баланса на основной.")
                 except: pass
                 
-            await callback.message.edit_text(f"✅ <b>{amount:.2f}₽</b> успешно переведены на ваш основной баланс для покупки VPN!", parse_mode="HTML")
+            await callback.message.edit_caption(caption=f"✅ <b>{amount:.2f}₽</b> успешно переведены на ваш основной баланс для покупки VPN!", parse_mode="HTML")
         await state.clear()
         return
 
@@ -217,7 +217,7 @@ async def process_withdraw_method(callback: CallbackQuery, session: AsyncSession
     await state.update_data(withdraw_method=method)
     text = "💳 Введите номер вашей банковской карты (и название банка):" if method == "card" else "🪙 Введите адрес вашего крипто-кошелька (сеть TRC20/TON):"
     
-    await callback.message.edit_text(text, reply_markup=cancel_kb())
+    await callback.message.edit_caption(caption=text, reply_markup=cancel_kb(), parse_mode="HTML")
 
 @router.message(WithdrawStates.waiting_for_details)
 async def finalize_withdraw_request(message: Message, session: AsyncSession, state: FSMContext):
@@ -278,7 +278,7 @@ async def admin_withdraw_done(callback: CallbackQuery, session: AsyncSession):
     tx.status = "COMPLETED"
     await session.commit()
     
-    await callback.message.edit_text(callback.message.html_text + "\n\n<b>[✅ ВЫПЛАЧЕНО]</b>", parse_mode="HTML")
+    await callback.message.edit_caption(caption=callback.message.caption + "\n\n<b>[✅ ВЫПЛАЧЕНО]</b>", parse_mode="HTML")
     try:
         await callback.bot.send_message(tx.user_id, f"💳 <b>Ваша заявка на вывод {tx.amount}₽ успешно исполнена!</b>\nДеньги отправлены на ваши реквизиты.", parse_mode="HTML")
     except: pass
@@ -297,7 +297,7 @@ async def admin_withdraw_internal(callback: CallbackQuery, session: AsyncSession
     tx.description = "Возвращено на внутренний баланс админом: " + (tx.description or "")
     await session.commit()
     
-    await callback.message.edit_text(callback.message.html_text + "\n\n<b>[🔄 ПЕРЕВЕДЕНО НА ВНУТР. БАЛАНС]</b>", parse_mode="HTML")
+    await callback.message.edit_caption(caption=callback.message.caption + "\n\n<b>[🔄 ПЕРЕВЕДЕНО НА ВНУТР. БАЛАНС]</b>", parse_mode="HTML")
     try:
         await callback.bot.send_message(tx.user_id, f"🔄 Администратор перевел вашу заявку ({tx.amount}₽) на <b>основной баланс VPN</b>. Вы можете потратить их на подписку!", parse_mode="HTML")
     except: pass
@@ -315,7 +315,7 @@ async def admin_withdraw_reject(callback: CallbackQuery, session: AsyncSession):
     tx.status = "REJECTED"
     await session.commit()
     
-    await callback.message.edit_text(callback.message.html_text + "\n\n<b>[❌ ОТКЛОНЕНО]</b>", parse_mode="HTML")
+    await callback.message.edit_caption(caption=callback.message.caption + "\n\n<b>[❌ ОТКЛОНЕНО]</b>", parse_mode="HTML")
     try:
         await callback.bot.send_message(tx.user_id, f"❌ Ваша заявка на вывод {tx.amount}₽ была <b>отклонена</b>.\nСредства возвращены на ваш реферальный баланс.", parse_mode="HTML")
     except: pass
