@@ -180,12 +180,10 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
 
         await callback.message.edit_caption(
             caption=(
-                "💎 <b>Счет на оплату (USDT)</b>\n\n"
-                f"💰 Сумма: <b>{price_usdt} USDT</b> (~{price_rub}₽)\n"
-                f"⏱ Срок подписки: <b>{days} дней</b>\n\n"
-                "Нажмите «Оплатить» для перехода к оплате.\n"
-                "Счет действителен в течение 1 часа.\n\n"
-                f"Заказ: <code>#{order_id}</code>"
+                "🪙 <b>Оплата криптовалютой</b>\n\n"
+                f"💰 Сумма: <b>{price_usdt} USDT</b>\n"
+                f"🧾 Заказ: <code>#{order_id}</code>\n\n"
+                "<i>Вы можете оплатить через USDT (TRC20, TON, BEP20) или Toncoin.</i>"
             ),
             reply_markup=get_payment_keyboard(invoice_url, str(order_id)),
             parse_mode="HTML"

@@ -153,23 +153,22 @@ class CryptoBotService:
         logger.info(f"📤 CryptoBot Request: amount={amount_usdt}, order={order_id}")
         
         try:
-            async with httpx.AsyncClient() as session:
-                async with session.post(
-                    f"{self.base_url}/createInvoice",
-                    json=payload,
-                    headers=headers
-                ) as resp:
-                    result = await resp.json()
-                    
-                    logger.debug(f"CryptoBot response: {result}")
-                    
-                    if result.get("ok"):
-                        link = result["result"]["pay_url"]
-                        logger.info(f"✅ CryptoBot Invoice Created: {link}")
-                        return link
-                    else:
-                        logger.error(f"❌ CryptoBot API Error: {result}")
-                        return None
+            response = await self._client.post(
+                f"{self.base_url}/createInvoice",
+                json=payload,
+                headers=headers
+            )
+            result = response.json()
+            
+            logger.debug(f"CryptoBot response: {result}")
+            
+            if result.get("ok"):
+                link = result["result"]["pay_url"]
+                logger.info(f"✅ CryptoBot Invoice Created: {link}")
+                return link
+            else:
+                logger.error(f"❌ CryptoBot API Error: {result}")
+                return None
         except Exception as e:
             logger.error(f"❌ CryptoBot Connection Error: {e}")
             import traceback
