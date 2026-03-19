@@ -6,8 +6,9 @@
 import httpx
 import hashlib
 import hmac
+import json
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from loguru import logger
 
 from config import settings
@@ -27,11 +28,10 @@ class CryptoBotService:
     """
     
     def __init__(self):
-        self.base_url = "https://pay.cryptobot.app/api"
+        self.base_url = "https://pay.crypt.bot/api"
         self.token = settings.CRYPTO_BOT_TOKEN
         self._client = httpx.AsyncClient(timeout=30.0)
         
-        # Логируем токен для диагностики (показываем только первые и последние 4 символа)
         if self.token:
             safe_token = f"{self.token[:4]}...{self.token[-4:]}" if len(self.token) > 8 else "***"
             logger.info(f"CryptoBot токен: {safe_token} (длина: {len(self.token)})")
@@ -50,7 +50,7 @@ class CryptoBotService:
         self,
         method: str,
         endpoint: str,
-        json: Optional[Dict[str, Any]] = None,
+        json_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Выполнить HTTP запрос к API.
@@ -58,25 +58,22 @@ class CryptoBotService:
         Args:
             method: HTTP метод.
             endpoint: Эндпоинт API.
-            json: JSON данные для отправки.
+            json_data: JSON данные для отправки.
             
         Returns:
             Dict: Ответ от API.
         """
-        # Проверка токена перед запросом
         if not self.token or self.token == "your_crypto_bot_token_here":
             logger.error("❌ CRYPTO_BOT_TOKEN не задан или равен placeholder!")
-            raise Exception("CRYPTO_BOT_TOKEN не настроен. Пожалуйста, задайте токен в .env файле.")
+            raise Exception("CRYPTO_BOT_TOKEN не настроен.")
         
         url = f"{self.base_url}/{endpoint}"
         headers = await self._get_headers()
         
-        # Детальное логирование перед запросом
-        safe_json = json.copy() if json else {}
-        safe_json.pop('custom_payload', None)  # Скрываем чувствительные данные
+        safe_json = json_data.copy() if json_data else {}
+        safe_json.pop('payload', None)
         
         logger.debug(f"CryptoBot запрос: {method} {url}")
-        logger.debug(f"Headers: {headers}")
         logger.debug(f"JSON данные: {safe_json}")
         
         try:
@@ -84,22 +81,18 @@ class CryptoBotService:
                 method=method,
                 url=url,
                 headers=headers,
-                json=json,
+                json=json_data,
             )
             
-            # Логируем статус ответа
             logger.info(f"CryptoBot статус ответа: {response.status_code}")
-            
             response.raise_for_status()
             result = response.json()
             
-            # Детальное логирование ответа
             logger.debug(f"CryptoBot полный ответ: {result}")
             
             if not result.get("ok"):
                 error_msg = result.get('error', 'Unknown error')
                 logger.error(f"CryptoBot API error: {error_msg}")
-                logger.error(f"Полный ответ при ошибке: {result}")
                 raise Exception(f"CryptoBot API error: {error_msg}")
             
             return result
@@ -122,71 +115,66 @@ class CryptoBotService:
     
     async def create_invoice(
         self,
-        amount: float,
-        currency: str = "RUB",
+        amount_usdt: float,
+        order_id: int,
         description: Optional[str] = None,
-        custom_payload: Optional[str] = None,
         paid_btn_name: Optional[str] = None,
         paid_btn_url: Optional[str] = None,
-        allow_comments: bool = True,
-        ttl: int = 3600  # Время жизни счета в секундах
-    ) -> Dict[str, Any]:
+    ) -> Optional[str]:
         """
-        Создать счет на оплату.
+        Создать счет на оплату (по аналогии с рабочим проектом).
         
         Args:
-            amount: Сумма к оплате.
-            currency: Валюта (RUB, USDT, TON, и т.д.).
+            amount_usdt: Сумма в USDT.
+            order_id: ID заказа для payload.
             description: Описание платежа.
-            custom_payload: Полезная нагрузка (до 4000 символов).
             paid_btn_name: Название кнопки после оплаты.
             paid_btn_url: URL кнопки после оплаты.
-            allow_comments: Разрешить комментарии.
-            ttl: Время жизни счета в секундах.
             
         Returns:
-            Dict: Информация о созданном счете включая invoice_url.
+            str: Ссылка на оплату или None при ошибке.
         """
-        # Детальное логирование перед созданием счета
-        logger.info(f"CryptoBot create_invoice вызван: amount={amount}, currency={currency}")
-        logger.info(f"Описание: {description}")
-        logger.info(f"Custom payload: {custom_payload}")
-        
-        data = {
-            "amount": str(amount),
-            "currency": currency,
-            "description": description or "",
-            "allow_comments": allow_comments,
-            "ttl": ttl,
+        headers = {
+            "Crypto-Pay-API-Token": self.token,
+            "Content-Type": "application/json"
         }
         
-        if custom_payload:
-            data["custom_payload"] = custom_payload
+        payload = {
+            "asset": "USDT",
+            "amount": str(amount_usdt),
+            "description": description or f"Order #{order_id}",
+            "hidden_message": "Спасибо за оплату!",
+            "payload": str(order_id),
+            "allow_comments": False,
+            "allow_anonymous": True,
+            "expires_in": 3600
+        }
         
-        if paid_btn_name and paid_btn_url:
-            data["paid_btn_name"] = paid_btn_name
-            data["paid_btn_url"] = paid_btn_url
-        
-        logger.debug(f"JSON данные для создания счета: {data}")
+        logger.info(f"📤 CryptoBot Request: amount={amount_usdt}, order={order_id}")
         
         try:
-            result = await self._request("POST", "createInvoice", json=data)
-            invoice = result.get("result", {})
-            
-            logger.info(
-                f"✅ Создан счет CryptoBot: {invoice.get('invoice_id')} "
-                f"на сумму {amount} {currency}"
-            )
-            logger.debug(f"Полный ответ создания счета: {invoice}")
-            
-            return invoice
-            
+            async with httpx.AsyncClient() as session:
+                async with session.post(
+                    f"{self.base_url}/createInvoice",
+                    json=payload,
+                    headers=headers
+                ) as resp:
+                    result = await resp.json()
+                    
+                    logger.debug(f"CryptoBot response: {result}")
+                    
+                    if result.get("ok"):
+                        link = result["result"]["pay_url"]
+                        logger.info(f"✅ CryptoBot Invoice Created: {link}")
+                        return link
+                    else:
+                        logger.error(f"❌ CryptoBot API Error: {result}")
+                        return None
         except Exception as e:
-            logger.error(f"❌ Ошибка создания счета CryptoBot: {e}")
-            logger.error(f"Тип ошибки: {type(e).__name__}")
+            logger.error(f"❌ CryptoBot Connection Error: {e}")
             import traceback
             logger.error(f"Traceback:\n{traceback.format_exc()}")
-            raise
+            return None
     
     async def get_invoice(self, invoice_id: int) -> Dict[str, Any]:
         """
@@ -201,22 +189,22 @@ class CryptoBotService:
         data = {"invoice_id": invoice_id}
         
         try:
-            result = await self._request("POST", "getInvoice", json=data)
+            result = await self._request("POST", "getInvoice", json_data=data)
             return result.get("result", {})
         except Exception as e:
             logger.error(f"Ошибка получения счета {invoice_id}: {e}")
             raise
     
-    async def get_balance(self) -> List[Dict[str, Any]]:
+    async def get_balance(self) -> Dict[str, Any]:
         """
         Получить баланс бота.
         
         Returns:
-            List: Список балансов по разным валютам.
+            Dict: Баланс по разным валютам.
         """
         try:
             result = await self._request("POST", "getBalance")
-            return result.get("result", [])
+            return result.get("result", {})
         except Exception as e:
             logger.error(f"Ошибка получения баланса: {e}")
             raise
@@ -233,45 +221,6 @@ class CryptoBotService:
         """
         invoice = await self.get_invoice(invoice_id)
         return invoice.get("status", "unknown")
-    
-    async def transfer(
-        self,
-        user_ids: List[int],
-        asset: str,
-        amount: float,
-        spend_id: str,
-        comment: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Перевести средства пользователю в CryptoBot.
-        
-        Args:
-            user_ids: Список ID пользователей CryptoBot.
-            asset: Актив для перевода (USDT, TON, и т.д.).
-            amount: Сумма перевода.
-            spend_id: Уникальный ID транзакции (для идемпотентности).
-            comment: Комментарий к переводу.
-            
-        Returns:
-            Dict: Информация о переводе.
-        """
-        data = {
-            "user_ids": user_ids,
-            "asset": asset,
-            "amount": str(amount),
-            "spend_id": spend_id,
-        }
-        
-        if comment:
-            data["comment"] = comment
-        
-        try:
-            result = await self._request("POST", "transfer", json=data)
-            logger.info(f"Перевод {amount} {asset} пользователям {user_ids}")
-            return result.get("result", {})
-        except Exception as e:
-            logger.error(f"Ошибка перевода: {e}")
-            raise
     
     async def close(self):
         """Закрыть HTTP клиент."""

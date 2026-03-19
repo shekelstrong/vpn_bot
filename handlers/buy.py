@@ -140,7 +140,6 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
     """Оплата через CryptoBot (USDT)."""
     user_id = callback.from_user.id
     
-    # Получаем данные из состояния
     data = await state.get_data()
     price_rub = data.get("price", settings.SUBSCRIPTION_PRICE_RUB)
     days = data.get("days", settings.SUBSCRIPTION_EXPIRE_DAYS)
@@ -148,29 +147,14 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
     await callback.answer("⏳ Создание счета...")
 
     try:
-        # Конвертируем RUB в USDT
         price_usdt = round(price_rub / settings.USDT_TO_RUB_RATE, 2)
         
-        # Создаем счет в CryptoBot в USDT
-        custom_payload = f"user_{user_id}_sub_{days}d"
+        bot_info = await callback.bot.get_me()
+        bot_username = bot_info.username
         
-        invoice = await crypto_bot_service.create_invoice(
-            amount=price_usdt,
-            currency="USDT",
-            description=f"Nemo VPN подписка на {days} дней ({price_rub}₽)",
-            custom_payload=custom_payload,
-            paid_btn_name="Вернуться в бот",
-            paid_btn_url=f"https://t.me/{(await callback.bot.get_me()).username}",
-            ttl=3600
-        )
-
-        invoice_id = invoice.get("invoice_id")
-        invoice_url = invoice.get("invoice_url")
-
-        # Сохраняем счет в БД (сумму сохраняем в RUB)
         payment_invoice = PaymentInvoice(
             user_id=user_id,
-            invoice_id=str(invoice_id),
+            invoice_id=f"temp_{user_id}_{int(datetime.utcnow().timestamp())}",
             amount=price_rub,
             currency="RUB",
             payment_method="cryptobot",
@@ -179,6 +163,20 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
             expires_at=datetime.utcnow() + timedelta(hours=1)
         )
         session.add(payment_invoice)
+        await session.flush()
+        await session.refresh(payment_invoice)
+        
+        order_id = payment_invoice.id
+        invoice_url = await crypto_bot_service.create_invoice(
+            amount_usdt=price_usdt,
+            order_id=order_id,
+            description=f"Nemo VPN подписка на {days} дней ({price_rub}₽)",
+            paid_btn_name="Вернуться в бот",
+            paid_btn_url=f"https://t.me/{bot_username}"
+        )
+
+        if not invoice_url:
+            raise Exception("Не удалось создать счет в CryptoBot")
 
         await callback.message.edit_caption(
             caption=(
@@ -187,16 +185,16 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
                 f"⏱ Срок подписки: <b>{days} дней</b>\n\n"
                 "Нажмите «Оплатить» для перехода к оплате.\n"
                 "Счет действителен в течение 1 часа.\n\n"
-                f"ID счета: <code>{invoice_id}</code>"
+                f"Заказ: <code>#{order_id}</code>"
             ),
-            reply_markup=get_payment_keyboard(invoice_url, str(invoice_id)),
+            reply_markup=get_payment_keyboard(invoice_url, str(order_id)),
             parse_mode="HTML"
         )
 
-        await state.update_data(invoice_id=str(invoice_id))
+        await state.update_data(order_id=str(order_id))
         await state.set_state("waiting_for_payment")
         
-        logger.info(f"Создан счет CryptoBot {invoice_id} для пользователя {user_id}: {price_usdt} USDT")
+        logger.info(f"Создан счет CryptoBot #{order_id} для пользователя {user_id}: {price_usdt} USDT")
 
     except Exception as e:
         logger.error(f"Ошибка создания счета CryptoBot: {e}")

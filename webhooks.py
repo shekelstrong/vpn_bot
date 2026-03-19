@@ -18,6 +18,7 @@ from loguru import logger
 import sys
 from pathlib import Path
 import json
+from typing import Optional
 
 from config import settings
 from database.models import User, PaymentInvoice, Transaction
@@ -48,7 +49,7 @@ logger.add(
     level="DEBUG",
 )
 
-def validate_webhook_signature(body_text: str, signature: str, token: str = None) -> bool:
+def validate_webhook_signature(body_text: str, signature: str, token: Optional[str] = None) -> bool:
     """
     Проверить HMAC-SHA256 подпись webhook CryptoBot.
     
@@ -74,7 +75,8 @@ def validate_webhook_signature(body_text: str, signature: str, token: str = None
         import hmac
         import hashlib
         
-        secret = hashlib.sha256(token.encode()).digest()
+        token_str = token if token is not None else ""
+        secret = hashlib.sha256(token_str.encode()).digest()
         hmac_obj = hmac.new(secret, body_text.encode(), hashlib.sha256)
         calculated_signature = hmac_obj.hexdigest()
         
@@ -102,81 +104,85 @@ class WebhookHandler:
         )
 
     async def handle_crypto_webhook(self, request: web.Request) -> web.Response:
-        """Обработка вебхука от CryptoBot."""
+        """Обработка вебхука от CryptoBot (по аналогии с рабочим проектом)."""
         try:
-            # Получаем тело запроса для проверки подписи
             body_bytes = await request.read()
             body_text = body_bytes.decode('utf-8')
             
-            # Получаем подпись из заголовка
             signature = request.headers.get('crypto-pay-api-signature')
             
-            # Проверяем подпись если настроен токен
             if settings.CRYPTO_BOT_TOKEN and signature:
                 if not check_webhook_signature(body_text, signature, settings.CRYPTO_BOT_TOKEN):
                     logger.warning("Неверная подпись вебхука CryptoBot")
                     return web.json_response({"error": "Invalid signature"}, status=403)
             
-            # Парсим JSON
             data = await request.json()
-            logger.info(f"CryptoBot webhook: {data}")
+            logger.info(f"🪙 CRYPTOBOT DATA: {data}")
 
-            invoice_id = data.get('invoice_id')
-            status = data.get('status')
+            if data.get("update_type") != "invoice_paid":
+                return web.json_response({"status": "ok", "msg": "ignored type"})
 
-            if not invoice_id or status != 'paid':
+            invoice = data.get("payload", {})
+            order_id_str = invoice.get("payload")
+            amount_usdt = invoice.get("amount")
+            asset = invoice.get("asset", "USDT")
+            invoice_id = invoice.get("invoice_id")
+            
+            if not order_id_str:
+                logger.error("Нет order_id в payload")
+                return web.json_response({"status": "ok"})
+            
+            try:
+                order_id = int(order_id_str)
+            except ValueError:
+                logger.error(f"Некорректный order_id: {order_id_str}")
                 return web.json_response({"status": "ok"})
 
-            # Получаем информацию о платеже
-            amount = float(data.get('amount', 0))
-            currency = data.get('currency', 'USDT')
-            
-            # Конвертируем USDT в RUB
-            amount_rub = amount
-            if currency == 'USDT':
-                amount_rub = amount * settings.USDT_TO_RUB_RATE
-                logger.info(f"Конвертация {amount} USDT = {amount_rub} RUB (Курс: {settings.USDT_TO_RUB_RATE})")
+            async with self.session_factory() as session:
+                result = await session.execute(
+                    select(PaymentInvoice).where(PaymentInvoice.id == order_id)
+                )
+                payment_invoice = result.scalar_one_or_none()
+                
+                if not payment_invoice:
+                    logger.error(f"PaymentInvoice не найден для order_id: {order_id}")
+                    return web.json_response({"status": "ok"})
+                
+                if payment_invoice.status == "paid":
+                    logger.info(f"Платеж #{order_id} уже обработан")
+                    return web.json_response({"status": "ok"})
+                
+                payment_invoice.status = "paid"
+                payment_invoice.invoice_id = str(invoice_id)
+                await session.commit()
+                await session.refresh(payment_invoice)
+                
+                tg_user_id = payment_invoice.user_id
+                days = 30
+                
+                if payment_invoice.payload:
+                    try:
+                        import json
+                        payload = json.loads(payment_invoice.payload)
+                        days = payload.get("days", 30)
+                    except:
+                        pass
 
-            # Парсим custom_payload (формат: user_TG_ID_sub_DAYSd)
-            custom_payload = data.get('custom_payload', '')
-            tg_user_id = None
-            days = 30
-
-            if custom_payload:
-                try:
-                    parts = custom_payload.split('_')
-                    if len(parts) >= 4:
-                        tg_user_id = int(parts[1])
-                        days = int(parts[3].replace('d', ''))
-                except:
-                    pass
-
-            # Если в payload нет ID, ищем в базе счетов
-            if tg_user_id is None:
-                async with self.session_factory() as session:
-                    result = await session.execute(
-                        select(PaymentInvoice).where(PaymentInvoice.invoice_id == str(invoice_id))
-                    )
-                    invoice = result.scalar_one_or_none()
-                    if invoice:
-                        tg_user_id = invoice.user_id
-
-            if not tg_user_id:
-                return web.json_response({"error": "User not found"}, status=404)
-
-            await self.process_payment(
-                tg_user_id=tg_user_id,
-                amount=amount_rub,
-                currency='RUB',
-                payment_method='cryptobot',
-                payment_id=str(invoice_id),
-                days=days
-            )
+                await self.process_payment(
+                    tg_user_id=tg_user_id,
+                    amount=payment_invoice.amount,
+                    currency=payment_invoice.currency,
+                    payment_method='cryptobot',
+                    payment_id=str(invoice_id),
+                    days=days
+                )
 
             return web.json_response({"status": "ok"})
 
         except Exception as e:
             logger.error(f"CryptoBot webhook error: {e}")
+            import traceback
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
             return web.json_response({"error": str(e)}, status=500)
 
     async def handle_platega_webhook(self, request: web.Request) -> web.Response:
@@ -196,27 +202,29 @@ class WebhookHandler:
             if not tg_user_id:
                 return web.json_response({"error": "User not found"}, status=404)
 
-            # Получаем количество дней из PaymentInvoice
             days = 30
-            async with self.session_factory() as session:
-                result = await session.execute(
-                    select(PaymentInvoice).where(PaymentInvoice.invoice_id == payment_data.payment_id)
-                )
-                invoice = result.scalar_one_or_none()
-                if invoice and invoice.payload:
-                    try:
-                        import json
-                        payload = json.loads(invoice.payload)
-                        days = payload.get("days", 30)
-                    except:
-                        pass
+            payment_id = payment_data.payment_id or ""
+            
+            if payment_id:
+                async with self.session_factory() as session:
+                    result = await session.execute(
+                        select(PaymentInvoice).where(PaymentInvoice.invoice_id == payment_id)
+                    )
+                    invoice = result.scalar_one_or_none()
+                    if invoice and invoice.payload:
+                        try:
+                            import json
+                            payload = json.loads(invoice.payload)
+                            days = payload.get("days", 30)
+                        except:
+                            pass
 
             await self.process_payment(
                 tg_user_id=tg_user_id,
                 amount=payment_data.amount,
                 currency=payment_data.currency,
                 payment_method='platega',
-                payment_id=payment_data.payment_id,
+                payment_id=payment_id,
                 days=days
             )
 
@@ -326,7 +334,8 @@ class WebhookHandler:
                     except: pass
 
                 if marzban_account_exists:
-                    await marzban_service.update_user_expiry(user.marzban_username, days)
+                    if user.marzban_username:
+                        await marzban_service.update_user_expiry(user.marzban_username, days)
                 else:
                     # Создаем новый аккаунт если его нет (или был удален триал)
                     new_acc = await marzban_service.create_user(
