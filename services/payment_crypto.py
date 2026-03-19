@@ -224,6 +224,46 @@ class CryptoBotService:
     async def close(self):
         """Закрыть HTTP клиент."""
         await self._client.close()
+    
+    async def get_webhook_info(self) -> Optional[Dict[str, Any]]:
+        """
+        Получить информацию о текущем вебхуке.
+        
+        Returns:
+            Dict: Информация о вебхуке или None при ошибке.
+        """
+        try:
+            result = await self._request("POST", "getWebhookInfo")
+            webhook_url = result.get("url")
+            logger.info(f"Текущий URL вебхука: {webhook_url}")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка получения информации о вебхуке: {e}")
+            return None
+    
+    async def set_webhook(self, webhook_url: str) -> Dict[str, Any]:
+        """
+        Установить URL вебхука для получения уведомлений.
+        
+        Args:
+            webhook_url: URL для вебхука (например: https://dealflow.bond/cryptopay)
+        
+        Returns:
+            Dict: Ответ от API.
+        """
+        data = {
+            "url": webhook_url
+        }
+        
+        logger.info(f"Установка вебхука на URL: {webhook_url}")
+        
+        try:
+            result = await self._request("POST", "setWebhook", json_data=data)
+            logger.info(f"✅ Вебхук успешно установлен на {webhook_url}")
+            return result
+        except Exception as e:
+            logger.error(f"❌ Ошибка установки вебхука: {e}")
+            raise
 
 
 def check_webhook_signature(body_text: str, signature: str, token: str) -> bool:
@@ -257,6 +297,7 @@ def check_webhook_signature(body_text: str, signature: str, token: str) -> bool:
         return is_valid
     except Exception as e:
         logger.error(f"Ошибка проверки подписи: {e}")
+        return False
         return False
 
 

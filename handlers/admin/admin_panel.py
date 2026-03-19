@@ -583,3 +583,56 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         "❌ Отменено.\n\nВыберите действие:",
         reply_markup=get_admin_keyboard() if is_admin(message.from_user.id) else get_main_menu_keyboard(),
     )
+
+
+@router.message(Command("webhook_check"))
+async def cmd_webhook_check(message: types.Message):
+    """Проверить текущий вебхук CryptoBot."""
+    from services.payment_crypto import crypto_bot_service
+    
+    await message.answer("⏳ Проверка вебхука CryptoBot...")
+    
+    try:
+        webhook_info = await crypto_bot_service.get_webhook_info()
+        
+        if webhook_info:
+            webhook_url = webhook_info.get("url", "Не установлен")
+            text = (
+                f"🪙 <b>Информация о вебхуке CryptoBot</b>\n\n"
+                f"🔗 URL: <code>{webhook_url}</code>\n\n"
+                f"<i>Если URL пустой или неправильный, используйте /webhook_set</i>"
+            )
+        else:
+            text = "❌ Не удалось получить информацию о вебхуке."
+        
+        await message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Ошибка проверки вебхука: {e}")
+        await message.answer(f"❌ Ошибка: {e}")
+
+
+@router.message(Command("webhook_set"))
+async def cmd_webhook_set(message: types.Message):
+    """Установить вебхук CryptoBot."""
+    from services.payment_crypto import crypto_bot_service
+    
+    webhook_url = "https://dealflow.bond/cryptopay"
+    
+    await message.answer(f"⏳ Установка вебхука на URL: {webhook_url}...")
+    
+    try:
+        result = await crypto_bot_service.set_webhook(webhook_url)
+        
+        if result.get("ok"):
+            text = (
+                f"✅ <b>Вебхук успешно установлен!</b>\n\n"
+                f"🔗 URL: <code>{webhook_url}</code>\n\n"
+                f"<i>Теперь CryptoBot будет отправлять уведомления об оплатах на этот URL.</i>"
+            )
+        else:
+            text = f"❌ Ошибка: {result}"
+        
+        await message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Ошибка установки вебхука: {e}")
+        await message.answer(f"❌ Ошибка: {e}")

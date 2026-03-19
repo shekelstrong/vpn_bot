@@ -105,11 +105,19 @@ class WebhookHandler:
 
     async def handle_crypto_webhook(self, request: web.Request) -> web.Response:
         """Обработка вебхука от CryptoBot (по аналогии с рабочим проектом)."""
+        logger.info("=" * 50)
+        logger.info("🪙 CryptoBot webhook получен!")
+        logger.info(f"URL: {request.url}")
+        logger.info(f"Method: {request.method}")
+        logger.info(f"Headers: {dict(request.headers)}")
+        
         try:
             body_bytes = await request.read()
             body_text = body_bytes.decode('utf-8')
+            logger.info(f"Body length: {len(body_bytes)}")
             
             signature = request.headers.get('crypto-pay-api-signature')
+            logger.info(f"Signature: {signature[:20] if signature else 'None'}...")
             
             if settings.CRYPTO_BOT_TOKEN and signature:
                 if not check_webhook_signature(body_text, signature, settings.CRYPTO_BOT_TOKEN):
