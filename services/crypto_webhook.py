@@ -3,7 +3,7 @@
 """
 
 from aiogram import Bot
-from aiocryptopay import AioCryptoPay, Invoice
+from aiocryptopay import AioCryptoPay
 from loguru import logger
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
@@ -193,37 +193,51 @@ async def issue_subscription(
         pass
     
     try:
-        # Создаем или обновляем пользователя в Marzban
         if user.marzban_username:
             try:
-                # Проверяем, существует ли пользователь в Marzban
                 marzban_user = await marzban_service.get_user(user.marzban_username)
                 
                 if marzban_user:
-                    # Пользователь существует - обновляем срок
                     await marzban_service.update_user_expiry(
                         username=user.marzban_username,
                         days=days
                     )
                     logger.info(f"Подписка пользователя {user.marzban_username} продлена на {days} дней")
                 else:
-                    # Пользователь не существует - создаем нового
                     logger.info(f"Пользователь {user.marzban_username} не найден в Marzban, создаем нового")
-                    
                     new_user = await marzban_service.create_user(
                         tg_id=user.user_id,
                         username=user.username,
                         expire_days=days,
-                        data_limit_gb=0.0  # Безлимит для платных подписок
+                        data_limit_gb=0.0
                     )
-                    
                     user.marzban_username = new_user.get("username")
                     logger.info(f"Создан пользователь Marzban: {user.marzban_username}")
-                    
             except Exception as e:
                 logger.error(f"Ошибка обновления Marzban: {e}")
                 raise
+        else:
+            try:
+                new_user = await marzban_service.create_user(
+                    tg_id=user.user_id,
+                    username=user.username,
+                    expire_days=days,
+                    data_limit_gb=0.0
+                )
+                user.marzban_username = new_user.get("username")
+                logger.info(f"Создан новый пользователь Marzban: {user.marzban_username}")
+            except Exception as e:
+                logger.error(f"Ошибка создания пользователя в Marzban: {e}")
+                raise
         
+        try:
+            await bot.send_message(
+                user.user_id,
+                f"✅ Подписка успешно продлена на {days} дней!"
+            )
         except Exception as e:
-            logger.error(f"Ошибка выдачи подписки: {e}")
-            raise
+            logger.warning(f"Не удалось отправить уведомление пользователю: {e}")
+    
+    except Exception as e:
+        logger.error(f"Ошибка выдачи подписки: {e}")
+        raise
