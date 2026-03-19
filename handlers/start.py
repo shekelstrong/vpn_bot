@@ -144,9 +144,8 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot):
         "Выберите действие в меню ниже:"
     )
 
-    await message.answer_video(
-        video="приветственное.mov",
-        caption=welcome_text,
+    await message.answer(
+        text=welcome_text,
         reply_markup=get_main_menu_keyboard(show_trial=show_trial),
         parse_mode="HTML"
     )

@@ -88,9 +88,8 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
         
         text += f"▫️ {period['days']} дней — {int(price)}₽{discount_text}\n"
     
-    await message.answer_video(
-        video="оплата.mov",
-        caption=text,
+    await message.answer(
+        text=text,
         reply_markup=get_subscription_duration_keyboard(
             price_1m=prices.get("1month", base_price),
             price_3m=prices.get("3month", base_price * 3),
