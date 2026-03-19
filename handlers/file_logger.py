@@ -23,7 +23,7 @@ async def handle_video(message: types.Message):
         f"📁 Имя файла: {video.file_name or 'Без названия'}\n"
         f"📏 Размер: {video.file_size} байт\n"
         f"⏱ Длительность: {video.duration} сек\n\n"
-        f"✅ Скопируйте <b>file_id</code> выше и используйте в коде"
+        f"✅ Скопируйте <b>file_id</b> выше и используйте в коде"
     )
     
     await message.answer(text=response_text, parse_mode="HTML")
@@ -44,7 +44,7 @@ async def handle_document(message: types.Message):
         f"📁 Имя файла: {document.file_name or 'Без названия'}\n"
         f"📏 Размер: {document.file_size} байт\n"
         f"📌 MIME тип: {document.mime_type or 'Неизвестно'}\n\n"
-        f"✅ Скопируйте <b>file_id</code> выше и используйте в коде"
+        f"✅ Скопируйте <b>file_id</b> выше и используйте в коде"
     )
     
     await message.answer(text=response_text, parse_mode="HTML")
@@ -64,7 +64,7 @@ async def handle_photo(message: types.Message):
         f"🆔 Unique ID: <code>{file_unique_id}</code>\n"
         f"📏 Размер: {photo.file_size} байт\n"
         f"📐 Разрешение: {photo.width}x{photo.height}\n\n"
-        f"✅ Скопируйте <b>file_id</code> выше и используйте в коде"
+        f"✅ Скопируйте <b>file_id</b> выше и используйте в коде"
     )
     
     await message.answer(text=response_text, parse_mode="HTML")
