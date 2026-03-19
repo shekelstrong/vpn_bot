@@ -48,7 +48,48 @@ logger.add(
     level="DEBUG",
 )
 
-class WebhookHandler:
+def validate_webhook_signature(body_text: str, signature: str, token: str = None) -> bool:
+    """
+    Проверить HMAC-SHA256 подпись webhook CryptoBot.
+    
+    Формула: header['crypto-pay-api-signature'] == hmac_sha256(secret, body)
+    где secret = sha256(api_token)
+    
+    Args:
+        body_text: Тело запроса в виде строки
+        signature: Значение из заголовка 'crypto-pay-api-signature'
+        token: API токен (опционально, берется из настроек если не указан)
+        
+    Returns:
+        bool: True если подпись валидна, иначе False
+    """
+    if token is None:
+        token = settings.CRYPTO_BOT_TOKEN
+    
+    if not token or not signature:
+        logger.warning("Токен или подпись отсутствуют")
+        return False
+    
+    try:
+        import hmac
+        import hashlib
+        
+        secret = hashlib.sha256(token.encode()).digest()
+        hmac_obj = hmac.new(secret, body_text.encode(), hashlib.sha256)
+        calculated_signature = hmac_obj.hexdigest()
+        
+        is_valid = calculated_signature == signature
+        
+        if not is_valid:
+            logger.warning("Неверная подпись webhook CryptoBot")
+            logger.warning(f"Ожидается: {calculated_signature[:20]}...")
+            logger.warning(f"Получено: {signature[:20]}...")
+        
+        return is_valid
+    except Exception as e:
+        logger.error(f"Ошибка проверки подписи: {e}")
+        return False
+\n\nclass WebhookHandler:
     """Обработчик вебхуков с логикой распределения прибыли."""
 
     def __init__(self):

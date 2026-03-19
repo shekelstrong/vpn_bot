@@ -43,9 +43,14 @@ from handlers.profile import router as profile_router
 from handlers.trial import router as trial_router
 from handlers.buy import router as buy_router
 from handlers.help import router as help_router
-from handlers.admin import router as admin_router
+from handlers.admin import router as router as admin_router
 from handlers.admin.settings import router as admin_settings_router
 from handlers.referrals import router as referrals_router
+
+# Импортируем сервисы CryptoBot v2
+from services.crypto_bot_v2 import crypto_bot_v2_service
+from services.crypto_webhook import handle_crypto_webhook_update
+
 
 
 async def update_trial_command_for_user(user_id: int, has_active_subscription: bool):
