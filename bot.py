@@ -43,7 +43,7 @@ from handlers.profile import router as profile_router
 from handlers.trial import router as trial_router
 from handlers.buy import router as buy_router
 from handlers.help import router as help_router
-from handlers.admin import router as router as admin_router
+from handlers.admin import router as admin_router
 from handlers.admin.settings import router as admin_settings_router
 from handlers.referrals import router as referrals_router
 

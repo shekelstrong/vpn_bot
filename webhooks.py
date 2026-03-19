@@ -89,7 +89,7 @@ def validate_webhook_signature(body_text: str, signature: str, token: str = None
     except Exception as e:
         logger.error(f"Ошибка проверки подписи: {e}")
         return False
-\n\nclass WebhookHandler:
+class WebhookHandler:
     """Обработчик вебхуков с логикой распределения прибыли."""
 
     def __init__(self):
