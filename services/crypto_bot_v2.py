@@ -4,7 +4,7 @@ CryptoBot v2 API сервис для создания счетов.
 """
 
 from aiogram import Bot
-from aiocryptopay import AioCryptoPay, Networks, Invoice
+from aiocryptopay import AioCryptoPay, Networks
 from loguru import logger
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -94,7 +94,7 @@ class CryptoBotV2Service:
             logger.info(f"  Custom payload: {custom_payload}")
             
             # Создаем счет
-            invoice: Invoice = await self.crypto.create_invoice(
+            invoice = await self.crypto.create_invoice(
                 asset="USDT",
                 amount=amount_usdt,
                 description=full_description,
