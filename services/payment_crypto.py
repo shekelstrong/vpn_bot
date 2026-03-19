@@ -63,6 +63,11 @@ class CryptoBotService:
         Returns:
             Dict: Ответ от API.
         """
+        # Проверка токена перед запросом
+        if not self.token or self.token == "your_crypto_bot_token_here":
+            logger.error("❌ CRYPTO_BOT_TOKEN не задан или равен placeholder!")
+            raise Exception("CRYPTO_BOT_TOKEN не настроен. Пожалуйста, задайте токен в .env файле.")
+        
         url = f"{self.base_url}/{endpoint}"
         headers = await self._get_headers()
         
@@ -110,7 +115,9 @@ class CryptoBotService:
                 try:
                     logger.error(f"Текст ответа: {e.response.text}")
                 except:
-                    pass
+                    logger.error("Не удалось получить текст ответа")
+            import traceback
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             raise
     
     async def create_invoice(
