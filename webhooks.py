@@ -23,6 +23,7 @@ from config import settings
 from database.models import User, PaymentInvoice, Transaction
 from services.marzban_api import marzban_service
 from services.payment_platega import platega_service
+from services.payment_crypto import check_webhook_signature
 from handlers.admin.notifications import (
     notify_admin_payment, 
     notify_referrer_payment, 
@@ -62,6 +63,20 @@ class WebhookHandler:
     async def handle_crypto_webhook(self, request: web.Request) -> web.Response:
         """Обработка вебхука от CryptoBot."""
         try:
+            # Получаем тело запроса для проверки подписи
+            body_bytes = await request.read()
+            body_text = body_bytes.decode('utf-8')
+            
+            # Получаем подпись из заголовка
+            signature = request.headers.get('crypto-pay-api-signature')
+            
+            # Проверяем подпись если настроен токен
+            if settings.CRYPTO_BOT_TOKEN and signature:
+                if not check_webhook_signature(body_text, signature, settings.CRYPTO_BOT_TOKEN):
+                    logger.warning("Неверная подпись вебхука CryptoBot")
+                    return web.json_response({"error": "Invalid signature"}, status=403)
+            
+            # Парсим JSON
             data = await request.json()
             logger.info(f"CryptoBot webhook: {data}")
 
@@ -70,6 +85,16 @@ class WebhookHandler:
 
             if not invoice_id or status != 'paid':
                 return web.json_response({"status": "ok"})
+
+            # Получаем информацию о платеже
+            amount = float(data.get('amount', 0))
+            currency = data.get('currency', 'USDT')
+            
+            # Конвертируем USDT в RUB
+            amount_rub = amount
+            if currency == 'USDT':
+                amount_rub = amount * settings.USDT_TO_RUB_RATE
+                logger.info(f"Конвертация {amount} USDT = {amount_rub} RUB (Курс: {settings.USDT_TO_RUB_RATE})")
 
             # Парсим custom_payload (формат: user_TG_ID_sub_DAYSd)
             custom_payload = data.get('custom_payload', '')
@@ -100,8 +125,8 @@ class WebhookHandler:
 
             await self.process_payment(
                 tg_user_id=tg_user_id,
-                amount=float(data.get('amount', 0)),
-                currency=data.get('currency', 'RUB'),
+                amount=amount_rub,
+                currency='RUB',
                 payment_method='cryptobot',
                 payment_id=str(invoice_id),
                 days=days
@@ -319,8 +344,8 @@ class WebhookHandler:
 async def run_webhooks():
     handler = WebhookHandler()
     app = web.Application()
-    app.router.add_post('/webhook/crypto', handler.handle_crypto_webhook)
-    app.router.add_post('/webhook/platega', handler.handle_platega_webhook)
+    app.router.add_post('/cryptopay', handler.handle_crypto_webhook)
+    app.router.add_post('/platega-webhook', handler.handle_platega_webhook)
     app.router.add_get('/health', handler.health_check)
 
     runner = web.AppRunner(app)
@@ -330,6 +355,9 @@ async def run_webhooks():
 
     logger.info("=" * 50)
     logger.info("Вебхук-сервер Nemo VPN запущен (Порт 8080)!")
+    logger.info("Webhooks:")
+    logger.info("  - https://dealflow.bond/cryptopay (CryptoBot)")
+    logger.info("  - https://dealflow.bond/platega-webhook (Platega)")
     logger.info("=" * 50)
 
     try:

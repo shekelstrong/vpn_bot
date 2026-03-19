@@ -75,14 +75,14 @@ def get_buy_keyboard() -> InlineKeyboardMarkup:
     Клавиатура выбора способа оплаты.
     
     Кнопки:
-        - CryptoBot (USDT/TON) 💰
+        - CryptoBot (USDT) 💰
         - Банковская карта 🏦
         - Реферальная программа 👥
         - Назад ↩️
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="CryptoBot (USDT/TON) 💰", callback_data="pay_crypto", style="primary")
+    builder.button(text="CryptoBot (USDT) 💰", callback_data="pay_crypto", style="primary")
     builder.button(text="Банковская карта 🏦", callback_data="pay_card", style="primary")
     builder.button(text="Оплатить с реферального баланса 💰", callback_data="referral", style="primary")
     builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")

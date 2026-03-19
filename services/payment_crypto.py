@@ -4,6 +4,8 @@
 """
 
 import httpx
+import hashlib
+import hmac
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from loguru import logger
@@ -220,6 +222,40 @@ class CryptoBotService:
     async def close(self):
         """Закрыть HTTP клиент."""
         await self._client.close()
+
+
+def check_webhook_signature(body_text: str, signature: str, token: str) -> bool:
+    """
+    Проверяет подпись вебхука CryptoBot.
+    
+    Формула: header['crypto-pay-api-signature'] == hmac_sha256(secret, body)
+    где secret = sha256(api_token)
+    
+    Args:
+        body_text: Тело запроса в виде строки
+        signature: Значение из заголовка 'crypto-pay-api-signature'
+        token: API токен CryptoBot
+        
+    Returns:
+        bool: True если подпись валидна, иначе False
+    """
+    if not token or not signature:
+        logger.warning("CRYPTO_BOT_TOKEN или signature отсутствуют")
+        return False
+    
+    try:
+        secret = hashlib.sha256(token.encode()).digest()
+        hmac_obj = hmac.new(secret, body_text.encode(), hashlib.sha256)
+        calculated_signature = hmac_obj.hexdigest()
+        
+        is_valid = calculated_signature == signature
+        if not is_valid:
+            logger.warning("Неверная подпись вебхука CryptoBot")
+        
+        return is_valid
+    except Exception as e:
+        logger.error(f"Ошибка проверки подписи: {e}")
+        return False
 
 
 # Глобальный экземпляр сервиса

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     # CryptoBot
     CRYPTO_BOT_TOKEN: str = Field(..., description="Токен CryptoBot API")
+    USDT_TO_RUB_RATE: float = Field(default=90.0, description="Курс USDT к RUB")
 
     # Platega
     PLATEGA_SECRET_KEY: str = Field(..., description="Секретный ключ Platega для вебхуков")
