@@ -46,6 +46,7 @@ from handlers.help import router as help_router
 from handlers.admin import router as admin_router
 from handlers.admin.settings import router as admin_settings_router
 from handlers.referrals import router as referrals_router
+from handlers.file_logger import router as file_logger_router
 
 
 async def update_trial_command_for_user(user_id: int, has_active_subscription: bool):
@@ -138,6 +139,7 @@ dp.include_router(help_router)
 dp.include_router(admin_router)
 dp.include_router(admin_settings_router)
 dp.include_router(referrals_router)
+dp.include_router(file_logger_router)
 
 
 @dp.message(Command("me"))
