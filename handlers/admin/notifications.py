@@ -184,19 +184,86 @@ async def notify_user_purchase(
     user_id: int,
     amount_rub: float,
     duration_days: int = 30,
-    is_extension: bool = False
+    is_extension: bool = False,
+    marzban_username: Optional[str] = None
 ):
-    """Уведомление пользователю об успешной покупке/продлении VPN"""
+    """Уведомление пользователю об успешной покупке/продлении VPN с отправкой ссылки и QR-кода"""
     action = "продлена" if is_extension else "оформлена"
     
-    message = (
-        f"✅ <b>Оплата {amount_rub:.2f}₽ прошла успешно!</b>\n\n"
-        f"Ваша подписка на VPN {action}.\n"
-        f"⏳ Добавлено времени: <b>{duration_days} дней</b>\n\n"
-        f"Приятного пользования Nemo VPN! 🌊"
-    )
+    # Получаем subscription_url из Marzban
+    subscription_url = ""
+    if marzban_username:
+        try:
+            from services.marzban_api import marzban_service
+            marzban_data = await marzban_service.get_user(marzban_username)
+            if marzban_data:
+                subscription_url = marzban_data.get("subscription_url", "")
+                if subscription_url and subscription_url.startswith("/"):
+                    from config import settings
+                    base_url = settings.MARZBAN_URL.rstrip("/")
+                    subscription_url = f"{base_url}{subscription_url}"
+        except Exception as e:
+            logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
+    
+    # Генерируем QR-код
+    qr_file = None
+    if subscription_url:
+        try:
+            import qrcode
+            import io
+            from aiogram.types import BufferedInputFile
+            qr = qrcode.QRCode(version=1, box_size=10, border=5)
+            qr.add_data(subscription_url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            bio = io.BytesIO()
+            img.save(bio, "PNG")
+            bio.seek(0)
+            qr_file = BufferedInputFile(bio.read(), filename="qr.png")
+        except Exception as e:
+            logger.error(f"Ошибка генерации QR-кода для {user_id}: {e}")
+    
+    # Формируем сообщение с инструкциями
+    if subscription_url and qr_file:
+        message = (
+            f"✅ <b>Оплата {amount_rub:.2f}₽ прошла успешно!</b>\n\n"
+            f"Ваша подписка на VPN {action}.\n"
+            f"⏳ Добавлено времени: <b>{duration_days} дней</b>\n\n"
+            f"🔗 <b>Ваша Умная ссылка:</b>\n"
+            f"<code>{subscription_url}</code>\n"
+            "<i>(Рекомендуется! Сама обновится при смене IP, скрыта от РКН)</i>\n\n"
+            "📱 <b>Инструкция для iOS и Android:</b>\n"
+            "1. Установите приложение <b>Hiddify</b> из магазина приложений.\n"
+            "2. Откройте приложение и нажмите <b>«+»</b> в правом верхнем углу.\n"
+            "3. Нажмите <b>«Добавить из буфера обмена»</b> — ссылка скопируется автоматически при нажатии на неё выше.\n"
+            "4. Нажмите огромную круглую кнопку для подключения.\n\n"
+            "💻 <b>Инструкция для Windows и Mac:</b>\n"
+            "1. Скачайте Hiddify и откройте его.\n"
+            "2. Нажмите на текст ссылки выше, чтобы скопировать её.\n"
+            "3. В приложении нажмите <b>«+»</b> → <b>«Добавить из буфера обмена»</b>.\n\n"
+            "📷 <b>Альтернативный способ (QR-код):</b>\n"
+            "Если вы активируете VPN на компьютере, можете отсканировать QR-код из этого сообщения через приложение на телефоне.\n\n"
+            "⚠️ Не передавайте ссылку третьим лицам!\n\n"
+            "Если возникнут проблемы с подключением, напишите в поддержку по кнопке «Помощь 🆘» из главного меню."
+        )
+    else:
+        message = (
+            f"✅ <b>Оплата {amount_rub:.2f}₽ прошла успешно!</b>\n\n"
+            f"Ваша подписка на VPN {action}.\n"
+            f"⏳ Добавлено времени: <b>{duration_days} дней</b>\n\n"
+            f"Приятного пользования Nemo VPN! 🌊\n\n"
+            "Для получения ссылки на подписку нажмите кнопку «Подписка» в профиле."
+        )
     
     try:
-        await bot.send_message(user_id, message, parse_mode="HTML")
+        if subscription_url and qr_file:
+            await bot.send_photo(
+                user_id,
+                photo=qr_file,
+                caption=message,
+                parse_mode="HTML"
+            )
+        else:
+            await bot.send_message(user_id, message, parse_mode="HTML")
     except Exception as e:
         logger.warning(f"Failed to notify user {user_id}: {e}")

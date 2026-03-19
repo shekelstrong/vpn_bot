@@ -354,7 +354,8 @@ class WebhookHandler:
                     bot=bot,
                     user_id=tg_user_id,
                     amount_rub=amount,
-                    duration_days=days
+                    duration_days=days,
+                    marzban_username=user.marzban_username
                 )
 
                 await notify_admin_payment(
