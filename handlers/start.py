@@ -18,6 +18,35 @@ from handlers.admin.notifications import notify_admin_new_user, notify_referrer_
 router = Router(name="start_router")
 
 
+async def edit_message_content(
+    message_or_callback: Message | CallbackQuery,
+    text: str = None,
+    caption: str = None,
+    reply_markup = None,
+    parse_mode: str = None
+):
+    """
+    Универсальная функция для редактирования сообщения (текст или видео).
+    """
+    msg = message_or_callback if isinstance(message_or_callback, Message) else message_or_callback.message
+    
+    try:
+        if hasattr(msg, 'video') and msg.video and caption:
+            await msg.edit_caption(
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+        else:
+            await msg.edit_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+    except Exception as e:
+        logger.error(f"Ошибка редактирования сообщения: {e}")
+
+
 async def generate_marzban_username(user_id: int) -> str:
     """Генерирует уникальное имя пользователя для Marzban."""
     return f"tg_{user_id}_{str(uuid.uuid4())[:6]}"
@@ -163,7 +192,8 @@ async def back_to_main(callback: CallbackQuery, session: AsyncSession):
     has_active_subscription = user.expire_date and user.expire_date > datetime.utcnow() if user else False
     show_trial = not has_active_subscription and not user.is_trial_used if user else True
     
-    await callback.message.edit_text(
+    await edit_message_content(
+        callback,
         text="🏠 <b>Главное меню Nemo VPN</b>\n\nВыберите действие:",
         reply_markup=get_main_menu_keyboard(show_trial=show_trial),
         parse_mode="HTML"

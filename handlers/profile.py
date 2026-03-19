@@ -323,9 +323,12 @@ async def show_subscription(callback_or_message: types.CallbackQuery | types.Mes
             "❌ У вас нет активной подписки.\n\n"
             "Вы можете оформить подписку\n"
             "и продолжить пользоваться Nemo VPN без ограничений.\n\n"
-            f"💳 <b>Стоимость:</b> {price}₽/месяц"
+            f"💳 <b>Стоимость:</b> {price}₽/месяц\n\n"
+            f"💳 <b>Купить подписку</b>"
         )
+        from keyboards.inline import get_back_keyboard
         await message.answer(
             text=text,
-            reply_markup=get_main_menu_keyboard(show_trial=not user.is_trial_used)
+            reply_markup=get_back_keyboard(callback_data="buy"),
+            parse_mode="HTML"
         )

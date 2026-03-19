@@ -9,12 +9,43 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
+from loguru import logger
 
 from database.models import User, Transaction
 from handlers.admin.notifications import notify_admin_withdrawal
 from config import settings
 
 router = Router(name="referrals_router")
+
+
+async def edit_message_content(
+    message_or_callback: Message | CallbackQuery,
+    text: str = None,
+    caption: str = None,
+    reply_markup = None,
+    parse_mode: str = None
+):
+    """
+    Универсальная функция для редактирования сообщения (текст или видео).
+    """
+    msg = message_or_callback if isinstance(message_or_callback, Message) else message_or_callback.message
+    
+    try:
+        if hasattr(msg, 'video') and msg.video and caption:
+            await msg.edit_caption(
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+        else:
+            await msg.edit_text(
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+    except Exception as e:
+        logger.error(f"Ошибка редактирования сообщения: {e}")
+
 
 # --- FSM States для вывода ---
 class WithdrawStates(StatesGroup):
@@ -61,7 +92,12 @@ async def show_referral_main_menu(callback: CallbackQuery, session: AsyncSession
         f"Минимальная сумма вывода: <b>1000 руб.</b>"
     )
     
-    await callback.message.edit_caption(caption=text, reply_markup=get_referral_keyboard(), parse_mode="HTML")
+    await edit_message_content(
+        callback,
+        text=text,
+        reply_markup=get_referral_keyboard(),
+        parse_mode="HTML"
+    )
 
 
 @router.callback_query(F.data == "referral_invite")
