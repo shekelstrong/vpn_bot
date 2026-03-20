@@ -26,25 +26,52 @@ async def edit_message_content(
     parse_mode: str = None
 ):
     """
-    Универсальная функция для редактирования сообщения (текст или видео).
+    Универсальная функция для редактирования сообщения. 
+    Автоматически решает проблему с переходом от медиа-сообщений (видео) к текстовым меню.
     """
-    msg = message_or_callback if isinstance(message_or_callback, Message) else message_or_callback.message
+    is_callback = isinstance(message_or_callback, CallbackQuery)
+    msg = message_or_callback.message if is_callback else message_or_callback
+    content_to_send = text or caption
+    has_media = bool(msg.photo or msg.video or msg.document or msg.animation)
     
     try:
-        if hasattr(msg, 'video') and msg.video and caption:
-            await msg.edit_caption(
-                caption=caption,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode
-            )
+        if has_media:
+            if text is not None:
+                # Хотим сделать сообщение текстовым, но текущее содержит медиа.
+                # Нельзя сделать edit_text для видео. Удаляем старое и шлем новое.
+                await msg.delete()
+                await msg.bot.send_message(
+                    chat_id=msg.chat.id,
+                    text=content_to_send,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+            else:
+                # Хотим просто обновить подпись под медиа
+                await msg.edit_caption(
+                    caption=content_to_send,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
         else:
+            # Обычное текстовое сообщение
             await msg.edit_text(
-                text=text,
+                text=content_to_send,
                 reply_markup=reply_markup,
                 parse_mode=parse_mode
             )
     except Exception as e:
         logger.error(f"Ошибка редактирования сообщения: {e}")
+        # Надежный fallback: если редактирование сорвалось, шлем новое сообщение
+        try:
+            await msg.bot.send_message(
+                chat_id=msg.chat.id,
+                text=content_to_send,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+        except:
+            pass
 
 
 # --- FSM States для вывода ---
@@ -188,7 +215,7 @@ async def show_referral_menu(callback: CallbackQuery, session: AsyncSession):
 async def cancel_withdraw(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await edit_message_content(callback,
-        caption="❌ Вывод средств отменен.", parse_mode="HTML")
+        text="❌ Вывод средств отменен.", parse_mode="HTML")
 
 @router.callback_query(F.data == "start_withdraw")
 async def start_withdraw(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
@@ -200,7 +227,8 @@ async def start_withdraw(callback: CallbackQuery, session: AsyncSession, state: 
         
     await state.set_state(WithdrawStates.waiting_for_amount)
     await edit_message_content(
-        caption=f"💰 Ваш реферальный баланс: <b>{user.referral_balance:.2f}₽</b>\n\n"
+        callback,
+        text=f"💰 Ваш реферальный баланс: <b>{user.referral_balance:.2f}₽</b>\n\n"
         f"Введите сумму, которую хотите вывести (числом):",
         reply_markup=cancel_kb(),
         parse_mode="HTML"
@@ -252,7 +280,7 @@ async def process_withdraw_method(callback: CallbackQuery, session: AsyncSession
                     await callback.bot.send_message(admin_id, f"ℹ️ Юзер {user.user_id} перевел {amount}₽ с реф. баланса на основной.")
                 except: pass
                 
-            await edit_message_content(caption=f"✅ <b>{amount:.2f}₽</b> успешно переведены на ваш основной баланс для покупки VPN!", parse_mode="HTML")
+            await edit_message_content(callback, text=f"✅ <b>{amount:.2f}₽</b> успешно переведены на ваш основной баланс для покупки VPN!", parse_mode="HTML")
         await state.clear()
         return
 
@@ -322,7 +350,9 @@ async def admin_withdraw_done(callback: CallbackQuery, session: AsyncSession):
     tx.status = "COMPLETED"
     await session.commit()
     
-    await edit_message_content(caption=callback.message.caption + "\n\n<b>[✅ ВЫПЛАЧЕНО]</b>", parse_mode="HTML")
+    old_text = getattr(callback.message, 'html_text', callback.message.text or callback.message.caption or "")
+    new_text = old_text + "\n\n<b>[✅ ВЫПЛАЧЕНО]</b>"
+    await edit_message_content(callback, text=new_text, parse_mode="HTML")
     try:
         await callback.bot.send_message(tx.user_id, f"💳 <b>Ваша заявка на вывод {tx.amount}₽ успешно исполнена!</b>\nДеньги отправлены на ваши реквизиты.", parse_mode="HTML")
     except: pass
@@ -341,7 +371,9 @@ async def admin_withdraw_internal(callback: CallbackQuery, session: AsyncSession
     tx.description = "Возвращено на внутренний баланс админом: " + (tx.description or "")
     await session.commit()
     
-    await edit_message_content(caption=callback.message.caption + "\n\n<b>[🔄 ПЕРЕВЕДЕНО НА ВНУТР. БАЛАНС]</b>", parse_mode="HTML")
+    old_text = getattr(callback.message, 'html_text', callback.message.text or callback.message.caption or "")
+    new_text = old_text + "\n\n<b>[🔄 ПЕРЕВЕДЕНО НА ВНУТР. БАЛАНС]</b>"
+    await edit_message_content(callback, text=new_text, parse_mode="HTML")
     try:
         await callback.bot.send_message(tx.user_id, f"🔄 Администратор перевел вашу заявку ({tx.amount}₽) на <b>основной баланс VPN</b>. Вы можете потратить их на подписку!", parse_mode="HTML")
     except: pass
@@ -359,7 +391,9 @@ async def admin_withdraw_reject(callback: CallbackQuery, session: AsyncSession):
     tx.status = "REJECTED"
     await session.commit()
     
-    await edit_message_content(caption=callback.message.caption + "\n\n<b>[❌ ОТКЛОНЕНО]</b>", parse_mode="HTML")
+    old_text = getattr(callback.message, 'html_text', callback.message.text or callback.message.caption or "")
+    new_text = old_text + "\n\n<b>[❌ ОТКЛОНЕНО]</b>"
+    await edit_message_content(callback, text=new_text, parse_mode="HTML")
     try:
         await callback.bot.send_message(tx.user_id, f"❌ Ваша заявка на вывод {tx.amount}₽ была <b>отклонена</b>.\nСредства возвращены на ваш реферальный баланс.", parse_mode="HTML")
     except: pass

@@ -85,9 +85,9 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
             discount_text = f" (экономия {savings}₽, {discount_percent}% скидка)"
         text += f"▪️ {period['days']} дней — {int(price)}₽{discount_text}\n"
 
-    await message.answer_video(
-        video="CQACAgIAAxKBAAID0Gm80Qf8cB0UR0nD5zItv-P6Yw82AAKanAACaxDgSSDBilgMEUksOgQ",
-        caption=text,
+    # Используем answer вместо answer_video
+    await message.answer(
+        text=text,
         reply_markup=get_subscription_duration_keyboard(
             price_test=prices.get("test3d", 10),
             price_1m=prices.get("1month", base_price),
@@ -125,8 +125,8 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
         price=int(price)
     )
 
-    await callback.message.edit_caption(
-        caption=(
+    await callback.message.edit_text(
+        text=(
             "✅ <b>Выбран тариф</b>\n\n"
             f"⏳ Срок: {period['days']} дней\n"
             f"💰 Цена: {int(price)} ₽\n\n"
@@ -180,8 +180,8 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
         if not invoice_url:
             raise Exception("Не удалось создать счет в CryptoBot")
 
-        await callback.message.edit_caption(
-            caption=(
+        await callback.message.edit_text(
+            text=(
                 "💎 <b>Оплата криптовалютой</b>\n\n"
                 f"💰 Сумма: <b>{price_usdt} USDT</b>\n"
                 f"📝 Заказ: <code>#{order_id}</code>\n\n"
@@ -239,8 +239,8 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
         )
         session.add(payment_invoice)
 
-        await callback.message.edit_caption(
-            caption=(
+        await callback.message.edit_text(
+            text=(
                 "💳 <b>Счет на оплату (Банковская карта)</b>\n\n"
                 f"💰 Сумма: <b>{price}₽</b>\n"
                 f"⏳ Срок подписки: <b>{days} дней</b>\n\n"
@@ -298,8 +298,8 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
 async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
     """Отмена оплаты."""
     await state.clear()
-    await callback.message.edit_caption(
-        caption="❌ Оплата отменена.\n\nВыберите действие:",
+    await callback.message.edit_text(
+        text="❌ Оплата отменена.\n\nВыберите действие:",
         reply_markup=get_main_menu_keyboard(),
         parse_mode="HTML"
     )
