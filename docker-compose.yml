@@ -20,6 +20,7 @@ services:
       - .env
     volumes:
       - .:/app
+    # Порт 8080 виден только внутри сети Docker для Nginx
     expose:
       - "8080"
     depends_on:
@@ -35,8 +36,7 @@ services:
       POSTGRES_DB: vpn_bot
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # ПОРТЫ УДАЛЕНЫ: База теперь защищена от внешнего мира
 
   nemo_vpn_redis:
     image: redis:7-alpine
