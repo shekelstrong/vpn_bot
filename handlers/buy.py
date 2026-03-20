@@ -187,7 +187,7 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
                 f"📝 Заказ: <code>#{order_id}</code>\n\n"
                 "<i>Вы можете оплатить через USDT (TRC20, TON, BEP20) или Toncoin.</i>"
             ),
-            reply_markup=get_payment_keyboard(invoice_url, str(order_id)),
+            reply_markup=get_payment_keyboard(invoice_url, payment_invoice.invoice_id),
             parse_mode="HTML"
         )
         await state.update_data(order_id=str(order_id))
