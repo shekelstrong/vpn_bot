@@ -225,6 +225,7 @@ def get_yes_no_keyboard(
 
 
 def get_subscription_duration_keyboard(
+    price_test: float = 10,
     price_1m: float = 100,
     price_3m: float = 270,
     price_6m: float = 500,
@@ -234,6 +235,7 @@ def get_subscription_duration_keyboard(
     Клавиатура выбора срока подписки.
     
     Args:
+        price_test: Цена за тестовый период
         price_1m: Цена за 1 месяц
         price_3m: Цена за 3 месяца
         price_6m: Цена за 6 месяцев
@@ -241,6 +243,7 @@ def get_subscription_duration_keyboard(
     """
     builder = InlineKeyboardBuilder()
     
+    builder.button(text=f"🧪 Тест 3 дня - {int(price_test)}₽", callback_data="duration_test3d", style="primary")
     builder.button(text=f"1 месяц - {int(price_1m)}₽", callback_data="duration_1month", style="primary")
     builder.button(text=f"3 месяца - {int(price_3m)}₽", callback_data="duration_3month", style="primary")
     builder.button(text=f"6 месяцев - {int(price_6m)}₽", callback_data="duration_6month", style="primary")

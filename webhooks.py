@@ -26,8 +26,8 @@ from services.marzban_api import marzban_service
 from services.payment_platega import platega_service
 from services.payment_crypto import check_webhook_signature
 from handlers.admin.notifications import (
-    notify_admin_payment, 
-    notify_referrer_payment, 
+    notify_admin_payment,
+    notify_referrer_payment,
     notify_user_purchase
 )
 
@@ -52,45 +52,46 @@ logger.add(
 def validate_webhook_signature(body_text: str, signature: str, token: Optional[str] = None) -> bool:
     """
     Проверить HMAC-SHA256 подпись webhook CryptoBot.
-    
+
     Формула: header['crypto-pay-api-signature'] == hmac_sha256(secret, body)
     где secret = sha256(api_token)
-    
+
     Args:
         body_text: Тело запроса в виде строки
         signature: Значение из заголовка 'crypto-pay-api-signature'
         token: API токен (опционально, берется из настроек если не указан)
-        
+
     Returns:
         bool: True если подпись валидна, иначе False
     """
     if token is None:
         token = settings.CRYPTO_BOT_TOKEN
-    
+
     if not token or not signature:
         logger.warning("Токен или подпись отсутствуют")
         return False
-    
+
     try:
         import hmac
         import hashlib
-        
+
         token_str = token if token is not None else ""
         secret = hashlib.sha256(token_str.encode()).digest()
         hmac_obj = hmac.new(secret, body_text.encode(), hashlib.sha256)
         calculated_signature = hmac_obj.hexdigest()
-        
+
         is_valid = calculated_signature == signature
-        
+
         if not is_valid:
             logger.warning("Неверная подпись webhook CryptoBot")
             logger.warning(f"Ожидается: {calculated_signature[:20]}...")
             logger.warning(f"Получено: {signature[:20]}...")
-        
+
         return is_valid
     except Exception as e:
         logger.error(f"Ошибка проверки подписи: {e}")
         return False
+
 class WebhookHandler:
     """Обработчик вебхуков с логикой распределения прибыли."""
 
@@ -98,8 +99,8 @@ class WebhookHandler:
         # Используем URL из конфига (PostgreSQL в докере или SQLite локально)
         self.engine = create_async_engine(settings.DATABASE_URL)
         self.session_factory = async_sessionmaker(
-            bind=self.engine, 
-            class_=AsyncSession, 
+            bind=self.engine,
+            class_=AsyncSession,
             expire_on_commit=False
         )
 
@@ -110,20 +111,20 @@ class WebhookHandler:
         logger.info(f"URL: {request.url}")
         logger.info(f"Method: {request.method}")
         logger.info(f"Headers: {dict(request.headers)}")
-        
+
         try:
             body_bytes = await request.read()
             body_text = body_bytes.decode('utf-8')
             logger.info(f"Body length: {len(body_bytes)}")
-            
+
             signature = request.headers.get('crypto-pay-api-signature')
             logger.info(f"Signature: {signature[:20] if signature else 'None'}...")
-            
+
             if settings.CRYPTO_BOT_TOKEN and signature:
                 if not check_webhook_signature(body_text, signature, settings.CRYPTO_BOT_TOKEN):
                     logger.warning("Неверная подпись вебхука CryptoBot")
                     return web.json_response({"error": "Invalid signature"}, status=403)
-            
+
             data = await request.json()
             logger.info(f"🪙 CRYPTOBOT DATA: {data}")
 
@@ -135,11 +136,11 @@ class WebhookHandler:
             amount_usdt = invoice.get("amount")
             asset = invoice.get("asset", "USDT")
             invoice_id = invoice.get("invoice_id")
-            
+
             if not order_id_str:
                 logger.error("Нет order_id в payload")
                 return web.json_response({"status": "ok"})
-            
+
             try:
                 order_id = int(order_id_str)
             except ValueError:
@@ -151,23 +152,23 @@ class WebhookHandler:
                     select(PaymentInvoice).where(PaymentInvoice.id == order_id)
                 )
                 payment_invoice = result.scalar_one_or_none()
-                
+
                 if not payment_invoice:
                     logger.error(f"PaymentInvoice не найден для order_id: {order_id}")
                     return web.json_response({"status": "ok"})
-                
+
                 if payment_invoice.status == "paid":
                     logger.info(f"Платеж #{order_id} уже обработан")
                     return web.json_response({"status": "ok"})
-                
+
                 payment_invoice.status = "paid"
                 payment_invoice.invoice_id = str(invoice_id)
                 await session.commit()
                 await session.refresh(payment_invoice)
-                
+
                 tg_user_id = payment_invoice.user_id
                 days = 30
-                
+
                 if payment_invoice.payload:
                     try:
                         import json
@@ -185,7 +186,7 @@ class WebhookHandler:
                     days=days
                 )
 
-            return web.json_response({"status": "ok"})
+                return web.json_response({"status": "ok"})
 
         except Exception as e:
             logger.error(f"CryptoBot webhook error: {e}")
@@ -212,13 +213,14 @@ class WebhookHandler:
 
             days = 30
             payment_id = payment_data.payment_id or ""
-            
+
             if payment_id:
                 async with self.session_factory() as session:
                     result = await session.execute(
                         select(PaymentInvoice).where(PaymentInvoice.invoice_id == payment_id)
                     )
                     invoice = result.scalar_one_or_none()
+
                     if invoice and invoice.payload:
                         try:
                             import json
@@ -254,7 +256,7 @@ class WebhookHandler:
         """Обработка успешного платежа и распределение реферальных бонусов."""
         from aiogram import Bot
         bot = Bot(token=settings.BOT_TOKEN)
-        
+
         async with self.session_factory() as session:
             try:
                 # 1. Получаем пользователя
@@ -295,22 +297,22 @@ class WebhookHandler:
                 referrers_bonuses = []
                 percentages = settings.referral_percentages_list # [15, 10, 5]
                 current_referrer_id = user.referrer_id
-                
+
                 for level, pct in enumerate(percentages, 1):
                     if not current_referrer_id:
                         break # Цепочка прервалась
-                    
+
                     # Получаем рефовода уровня N
                     ref_res = await session.execute(select(User).where(User.user_id == current_referrer_id))
                     referrer = ref_res.scalar_one_or_none()
-                    
+
                     if not referrer:
                         break
-                    
+
                     # Начисляем бонус
                     bonus_amount = amount * (pct / 100)
                     referrer.referral_balance += bonus_amount
-                    
+
                     # Сохраняем инфо для админского отчета
                     referrers_bonuses.append({
                         'level': level,
@@ -318,7 +320,7 @@ class WebhookHandler:
                         'username': referrer.username,
                         'bonus': bonus_amount
                     })
-                    
+
                     # Уведомляем рефовода о бонусе
                     await notify_referrer_payment(
                         bot=bot,
@@ -328,7 +330,7 @@ class WebhookHandler:
                         level=level,
                         referral_username=user.username
                     )
-                    
+
                     # Переходим к следующему уровню (рефовод рефовода)
                     current_referrer_id = referrer.referrer_id
 
@@ -342,8 +344,7 @@ class WebhookHandler:
                     except: pass
 
                 if marzban_account_exists:
-                    if user.marzban_username:
-                        await marzban_service.update_user_expiry(user.marzban_username, days)
+                    await marzban_service.update_user_expiry(user.marzban_username, days)
                 else:
                     # Создаем новый аккаунт если его нет (или был удален триал)
                     new_acc = await marzban_service.create_user(
