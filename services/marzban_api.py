@@ -163,7 +163,6 @@ class MarzbanService:
             result = await self._request("GET", f"/user/{marzban_username}")
             return result
         except httpx.HTTPStatusError as e:
-            # ИСПРАВЛЕНИЕ: Если пользователя нет в Marzban, просто возвращаем None без спама в логи
             if e.response.status_code == 404:
                 return None
             logger.error(f"Ошибка получения пользователя {marzban_username}: {e}")
@@ -187,25 +186,37 @@ class MarzbanService:
         marzban_username: str,
         extra_days: int
     ) -> Dict[str, Any]:
-        """Продлить подписку пользователя."""
+        """Продлить подписку пользователя и снять ограничения триала."""
         user = await self.get_user(marzban_username)
         
         if not user:
             raise ValueError(f"Пользователь {marzban_username} не найден в Marzban для продления")
             
-        current_expire = user.get("expire", 0)
-        if current_expire:
+        current_expire = user.get("expire") or 0
+        current_time = int(datetime.utcnow().timestamp())
+        
+        # Если подписка еще активна, плюсуем к ней. Если уже истекла - отсчитываем от сейчас!
+        if current_expire > current_time:
             new_expire = current_expire + (extra_days * 24 * 60 * 60)
         else:
-            new_expire = int((datetime.utcnow() + timedelta(days=extra_days)).timestamp())
+            new_expire = current_time + (extra_days * 24 * 60 * 60)
             
         update_data = {
             "expire": new_expire,
+            "data_limit": 0, # Снимаем триальный лимит по трафику (устанавливаем безлимит)
+            "status": "active" # Принудительно активируем аккаунт, если он был отключен
         }
         
         try:
             result = await self._request("PUT", f"/user/{marzban_username}", json=update_data)
-            logger.info(f"Продлена подписка {marzban_username} на {extra_days} дней")
+            
+            # Сбрасываем счетчик скачанного триального трафика
+            try:
+                await self.reset_user_traffic(marzban_username)
+            except Exception:
+                pass
+                
+            logger.info(f"Продлена подписка {marzban_username} на {extra_days} дней (установлен безлимит)")
             return result
         except Exception as e:
             logger.error(f"Ошибка продления подписки {marzban_username}: {e}")

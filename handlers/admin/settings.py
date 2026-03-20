@@ -236,7 +236,8 @@ async def show_user_management(callback: CallbackQuery):
         text="🔧 <b>Управление пользователями</b>\n\n"
         "Выберите действие:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔍 Найти пользователя", callback_data="admin_find_user")],
+            # ИСПРАВЛЕНИЕ: Был неверный callback "admin_find_user"
+            [InlineKeyboardButton(text="🔍 Найти пользователя", callback_data="admin_users")],
             [InlineKeyboardButton(text="↩️ Назад", callback_data="settings")]
         ])
     )

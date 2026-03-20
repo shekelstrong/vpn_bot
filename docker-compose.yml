@@ -10,6 +10,8 @@ services:
     depends_on:
       - nemo_vpn_db
       - nemo_vpn_redis
+    networks:
+      - nemo_net
 
   nemo_vpn_webhooks:
     build: .
@@ -25,6 +27,8 @@ services:
       - "8080"
     depends_on:
       - nemo_vpn_db
+    networks:
+      - nemo_net
 
   nemo_vpn_db:
     image: postgres:15-alpine
@@ -37,6 +41,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     # ПОРТЫ УДАЛЕНЫ: База теперь защищена от внешнего мира
+    networks:
+      - nemo_net
 
   nemo_vpn_redis:
     image: redis:7-alpine
@@ -44,6 +50,8 @@ services:
     restart: always
     volumes:
       - redisdata:/data
+    networks:
+      - nemo_net
 
   nemo_vpn_nginx:
     image: nginx:alpine
@@ -55,6 +63,12 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - nemo_vpn_webhooks
+    networks:
+      - nemo_net
+
+networks:
+  nemo_net:
+    driver: bridge
 
 volumes:
   pgdata:

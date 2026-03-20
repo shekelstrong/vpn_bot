@@ -3,7 +3,6 @@ import httpx
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BotCommand, BotCommandScopeChat
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
@@ -108,18 +107,18 @@ async def _process_manual_payment(bot, session: AsyncSession, payment_invoice: P
 
         await session.commit()
 
-        await notify_user_purchase(bot, user.user_id, payment_invoice.amount, days, user.marzban_username)
+        # ИСПРАВЛЕНИЕ: Передаем параметры строго по именам, чтобы не сбить Умную ссылку!
+        await notify_user_purchase(
+            bot=bot, 
+            user_id=user.user_id, 
+            amount_rub=payment_invoice.amount, 
+            duration_days=days, 
+            is_extension=marzban_account_exists,
+            marzban_username=user.marzban_username
+        )
+        
         await notify_admin_payment(bot, user.user_id, payment_invoice.amount, user.username, payment_invoice.payment_method, referrers_bonuses)
 
-        base_commands = [
-            BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="me", description="Мой профиль"),
-            BotCommand(command="buy", description="Купить подписку"),
-            BotCommand(command="sub", description="Подписка"),
-            BotCommand(command="referral", description="Реферальная программа"),
-            BotCommand(command="help", description="Помощь"),
-        ]
-        await bot.set_my_commands(base_commands, scope=BotCommandScopeChat(chat_id=user.user_id))
         logger.info(f"Ручная обработка платежа завершена для {user.user_id}")
     except Exception as e:
         logger.error(f"Ошибка ручной выдачи: {e}")
@@ -177,17 +176,24 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
             discount_text = f" (экономия {savings}₽, {discount_percent}% скидка)"
         text += f"▪️ {period['days']} дней — {int(price)}₽{discount_text}\n"
 
-    await message.answer(
-        text=text,
-        reply_markup=get_subscription_duration_keyboard(
-            price_test=prices.get("test3d", 10),
-            price_1m=prices.get("1month", base_price),
-            price_3m=prices.get("3month", base_price * 3),
-            price_6m=prices.get("6month", base_price * 6),
-            price_12m=prices.get("12month", base_price * 12)
-        ),
-        parse_mode="HTML"
+    keyboard = get_subscription_duration_keyboard(
+        price_test=prices.get("test3d", 10),
+        price_1m=prices.get("1month", base_price),
+        price_3m=prices.get("3month", base_price * 3),
+        price_6m=prices.get("6month", base_price * 6),
+        price_12m=prices.get("12month", base_price * 12)
     )
+
+    try:
+        await message.answer_video(
+            video="CQACAgIAAxKBAAID0Gm80Qf8cB0UR0nD5zItv-P6Yw82AAKanAACaxDgSSDBilgMEUksOgQ",
+            caption=text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось отправить видео ({e}), отправляем текстом.")
+        await message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("duration_"))
 async def select_duration(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
@@ -214,16 +220,22 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
         price=int(price)
     )
 
-    await callback.message.edit_text(
-        text=(
-            "✅ <b>Выбран тариф</b>\n\n"
-            f"⏳ Срок: {period['days']} дней\n"
-            f"💰 Цена: {int(price)} ₽\n\n"
-            "Выберите способ оплаты: 👇"
-        ),
-        reply_markup=get_buy_keyboard(),
-        parse_mode="HTML"
+    text = (
+        "✅ <b>Выбран тариф</b>\n\n"
+        f"⏳ Срок: {period['days']} дней\n"
+        f"💰 Цена: {int(price)} ₽\n\n"
+        "Выберите способ оплаты: 👇"
     )
+    keyboard = get_buy_keyboard()
+
+    try:
+        if callback.message.video:
+            await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Ошибка редактирования меню покупки: {e}")
+
     await callback.answer()
 
 @router.callback_query(F.data == "pay_crypto")
@@ -242,7 +254,6 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
         bot_info = await callback.bot.get_me()
         bot_username = bot_info.username
 
-        # Временная запись для резервации ID
         payment_invoice = PaymentInvoice(
             user_id=user_id,
             invoice_id=f"temp_{user_id}_{int(datetime.utcnow().timestamp())}",
@@ -270,20 +281,25 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
 
         invoice_url, real_invoice_id = result
 
-        # Перезаписываем временный ID на настоящий от CryptoBot
         payment_invoice.invoice_id = str(real_invoice_id)
         await session.commit()
 
-        await callback.message.edit_text(
-            text=(
-                "💎 <b>Оплата криптовалютой</b>\n\n"
-                f"💰 Сумма: <b>{price_usdt} USDT</b>\n"
-                f"📝 Заказ: <code>#{order_id}</code>\n\n"
-                "<i>Вы можете оплатить через USDT (TRC20, TON, BEP20) или Toncoin.</i>"
-            ),
-            reply_markup=get_payment_keyboard(invoice_url, str(real_invoice_id)),
-            parse_mode="HTML"
+        text = (
+            "💎 <b>Оплата криптовалютой</b>\n\n"
+            f"💰 Сумма: <b>{price_usdt} USDT</b>\n"
+            f"📝 Заказ: <code>#{order_id}</code>\n\n"
+            "<i>Вы можете оплатить через USDT (TRC20, TON, BEP20) или Toncoin.</i>"
         )
+        keyboard = get_payment_keyboard(invoice_url, str(real_invoice_id))
+
+        try:
+            if callback.message.video:
+                await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
+            else:
+                await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
+
         await state.update_data(order_id=str(order_id))
         await state.set_state("waiting_for_payment")
         logger.info(f"Создан счет CryptoBot #{order_id} (ID: {real_invoice_id}) для {user_id}: {price_usdt} USDT")
@@ -331,18 +347,24 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
         )
         session.add(payment_invoice)
 
-        await callback.message.edit_text(
-            text=(
-                "💳 <b>Счет на оплату (Банковская карта)</b>\n\n"
-                f"💰 Сумма: <b>{price}₽</b>\n"
-                f"⏳ Срок подписки: <b>{days} дней</b>\n\n"
-                "Нажмите «Оплатить» для перехода к оплате.\n"
-                "Счет действителен в течение 1 часа.\n\n"
-                f"ID заказа: <code>{order_id}</code>"
-            ),
-            reply_markup=get_payment_keyboard(payment_url, order_id),
-            parse_mode="HTML"
+        text = (
+            "💳 <b>Счет на оплату (Банковская карта)</b>\n\n"
+            f"💰 Сумма: <b>{price}₽</b>\n"
+            f"⏳ Срок подписки: <b>{days} дней</b>\n\n"
+            "Нажмите «Оплатить» для перехода к оплате.\n"
+            "Счет действителен в течение 1 часа.\n\n"
+            f"ID заказа: <code>{order_id}</code>"
         )
+        keyboard = get_payment_keyboard(payment_url, order_id)
+
+        try:
+            if callback.message.video:
+                await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
+            else:
+                await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            pass
+
         await state.update_data(invoice_id=order_id)
         await state.set_state("waiting_for_payment")
         logger.info(f"Создан счет Platega {order_id} для пользователя {user_id}")
@@ -379,7 +401,6 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
         await callback.answer("❌ Срок действия счета истек", show_alert=True)
         return
 
-    # Ручная проверка статуса через API CryptoBot
     if invoice.payment_method == "cryptobot":
         try:
             headers = {"Crypto-Pay-API-Token": settings.CRYPTO_BOT_TOKEN}
@@ -397,12 +418,22 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
                     
                     if status == "paid":
                         await _process_manual_payment(callback.bot, session, invoice)
-                        await callback.message.edit_text("✅ <b>Оплата подтверждена!</b> Подписка успешно выдана.", parse_mode="HTML")
+                        
+                        success_text = "✅ <b>Оплата подтверждена!</b> Подписка успешно выдана."
+                        if callback.message.video:
+                            await callback.message.edit_caption(caption=success_text, parse_mode="HTML")
+                        else:
+                            await callback.message.edit_text(text=success_text, parse_mode="HTML")
                         return
                     elif status in ["expired", "deleted"]:
                         invoice.status = "expired"
                         await session.commit()
-                        await callback.message.edit_text("❌ <b>Счет отменен или просрочен.</b>", parse_mode="HTML")
+                        
+                        fail_text = "❌ <b>Счет отменен или просрочен.</b>"
+                        if callback.message.video:
+                            await callback.message.edit_caption(caption=fail_text, parse_mode="HTML")
+                        else:
+                            await callback.message.edit_text(text=fail_text, parse_mode="HTML")
                         return
         except Exception as e:
             logger.error(f"Ошибка ручной проверки CryptoBot API: {e}")
@@ -413,9 +444,16 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
 async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
     """Отмена оплаты."""
     await state.clear()
-    await callback.message.edit_text(
-        text="❌ Оплата отменена.\n\nВыберите действие:",
-        reply_markup=get_main_menu_keyboard(),
-        parse_mode="HTML"
-    )
+    
+    text = "❌ Оплата отменена.\n\nВыберите действие:"
+    keyboard = get_main_menu_keyboard()
+    
+    try:
+        if callback.message.video:
+            await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        pass
+    
     await callback.answer()
