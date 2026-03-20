@@ -131,7 +131,7 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
     if isinstance(callback_or_message, types.CallbackQuery):
         callback = callback_or_message
         message = callback.message
-        user_id = callback.fromuser.id if hasattr(callback, 'from_user') else callback.from_user.id
+        user_id = callback.from_user.id if hasattr(callback, 'from_user') else callback.from_user.id
         await callback.answer()
     else:
         message = callback_or_message
