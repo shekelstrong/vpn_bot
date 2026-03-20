@@ -107,7 +107,6 @@ async def _process_manual_payment(bot, session: AsyncSession, payment_invoice: P
 
         await session.commit()
 
-        # ИСПРАВЛЕНИЕ: Передаем параметры строго по именам, чтобы не сбить Умную ссылку!
         await notify_user_purchase(
             bot=bot, 
             user_id=user.user_id, 
@@ -132,7 +131,7 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
     if isinstance(callback_or_message, types.CallbackQuery):
         callback = callback_or_message
         message = callback.message
-        user_id = callback.from_user.id
+        user_id = callback.fromuser.id if hasattr(callback, 'from_user') else callback.from_user.id
         await callback.answer()
     else:
         message = callback_or_message
@@ -185,14 +184,15 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
     )
 
     try:
-        await message.answer_video(
-            video="CQACAgIAAxKBAAID0Gm80Qf8cB0UR0nD5zItv-P6Yw82AAKanAACaxDgSSDBilgMEUksOgQ",
+        # ИСПРАВЛЕНИЕ: Используем актуальный file_id и метод answer_animation для GIF
+        await message.answer_animation(
+            animation="CgACAgIAAxkBAAIE7Wm804DyYOvViOUC--9rsXLvJ8ZtAALanwACaxDgSamsbGW6emV7OgQ",
             caption=text,
             reply_markup=keyboard,
             parse_mode="HTML"
         )
     except Exception as e:
-        logger.warning(f"Не удалось отправить видео ({e}), отправляем текстом.")
+        logger.warning(f"Не удалось отправить GIF ({e}), отправляем текстом.")
         await message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("duration_"))
@@ -229,7 +229,8 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
     keyboard = get_buy_keyboard()
 
     try:
-        if callback.message.video:
+        # Улучшенная проверка на наличие медиа-контента (видео, анимация, фото)
+        if callback.message.video or callback.message.animation or callback.message.photo:
             await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
         else:
             await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
@@ -293,7 +294,7 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
         keyboard = get_payment_keyboard(invoice_url, str(real_invoice_id))
 
         try:
-            if callback.message.video:
+            if callback.message.video or callback.message.animation or callback.message.photo:
                 await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
             else:
                 await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
@@ -358,7 +359,7 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
         keyboard = get_payment_keyboard(payment_url, order_id)
 
         try:
-            if callback.message.video:
+            if callback.message.video or callback.message.animation or callback.message.photo:
                 await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
             else:
                 await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
@@ -420,7 +421,7 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
                         await _process_manual_payment(callback.bot, session, invoice)
                         
                         success_text = "✅ <b>Оплата подтверждена!</b> Подписка успешно выдана."
-                        if callback.message.video:
+                        if callback.message.video or callback.message.animation or callback.message.photo:
                             await callback.message.edit_caption(caption=success_text, parse_mode="HTML")
                         else:
                             await callback.message.edit_text(text=success_text, parse_mode="HTML")
@@ -430,7 +431,7 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
                         await session.commit()
                         
                         fail_text = "❌ <b>Счет отменен или просрочен.</b>"
-                        if callback.message.video:
+                        if callback.message.video or callback.message.animation or callback.message.photo:
                             await callback.message.edit_caption(caption=fail_text, parse_mode="HTML")
                         else:
                             await callback.message.edit_text(text=fail_text, parse_mode="HTML")
@@ -449,7 +450,7 @@ async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
     keyboard = get_main_menu_keyboard()
     
     try:
-        if callback.message.video:
+        if callback.message.video or callback.message.animation or callback.message.photo:
             await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
         else:
             await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
