@@ -1,12 +1,15 @@
+import json
+import httpx
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.types import BotCommand, BotCommandScopeChat
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 from loguru import logger
 
-from database.models import User, PaymentInvoice
+from database.models import User, PaymentInvoice, Transaction
 from keyboards.inline import (
     get_buy_keyboard,
     get_payment_keyboard,
@@ -15,6 +18,11 @@ from keyboards.inline import (
 )
 from services.marzban_api import marzban_service
 from services.payment_crypto import crypto_bot_service
+from handlers.admin.notifications import (
+    notify_user_purchase,
+    notify_admin_payment,
+    notify_referrer_payment
+)
 from config import settings, get_db_setting, calculate_tariff_price
 
 router = Router()
@@ -27,6 +35,95 @@ SUBSCRIPTION_PERIODS = {
     "6month": {"days": 180, "months": 6},
     "12month": {"days": 365, "months": 12},
 }
+
+async def _process_manual_payment(bot, session: AsyncSession, payment_invoice: PaymentInvoice):
+    """Ручная обработка выдачи подписки, если вебхук потерялся по пути к серверу."""
+    try:
+        days = 30
+        if payment_invoice.payload:
+            try:
+                payload_data = json.loads(payment_invoice.payload)
+                days = payload_data.get("days", 30)
+            except: pass
+
+        result = await session.execute(select(User).where(User.user_id == payment_invoice.user_id))
+        user = result.scalar_one_or_none()
+        if not user: return
+
+        payment_invoice.status = "paid"
+
+        transaction = Transaction(
+            user_id=user.user_id,
+            amount=payment_invoice.amount,
+            currency=payment_invoice.currency,
+            payment_method=payment_invoice.payment_method,
+            status="paid",
+            payment_id=payment_invoice.invoice_id,
+            description=f"Оплата подписки на {days} дней",
+        )
+        session.add(transaction)
+
+        now = datetime.utcnow()
+        if user.expire_date and user.expire_date > now:
+            user.expire_date = user.expire_date + timedelta(days=days)
+        else:
+            user.expire_date = now + timedelta(days=days)
+
+        marzban_account_exists = False
+        if user.marzban_username:
+            try:
+                marzban_data = await marzban_service.get_user(user.marzban_username)
+                if marzban_data:
+                    marzban_account_exists = True
+            except: pass
+
+        if marzban_account_exists:
+            await marzban_service.update_user_expiry(user.marzban_username, days)
+        else:
+            new_acc = await marzban_service.create_user(
+                tg_id=user.user_id,
+                username=user.username,
+                expire_days=days,
+                data_limit_gb=0.0
+            )
+            user.marzban_username = new_acc.get('username')
+
+        referrers_bonuses = []
+        percentages = settings.referral_percentages_list
+        current_referrer_id = user.referrer_id
+
+        for level, pct in enumerate(percentages, 1):
+            if not current_referrer_id: break
+            ref_res = await session.execute(select(User).where(User.user_id == current_referrer_id))
+            referrer = ref_res.scalar_one_or_none()
+            if not referrer: break
+            
+            bonus = payment_invoice.amount * (pct / 100)
+            referrer.referral_balance += bonus
+            referrers_bonuses.append({
+                'level': level, 'id': referrer.user_id, 'username': referrer.username, 'bonus': bonus
+            })
+            await notify_referrer_payment(bot, referrer.user_id, user.user_id, bonus, level, user.username)
+            current_referrer_id = referrer.referrer_id
+
+        await session.commit()
+
+        await notify_user_purchase(bot, user.user_id, payment_invoice.amount, days, user.marzban_username)
+        await notify_admin_payment(bot, user.user_id, payment_invoice.amount, user.username, payment_invoice.payment_method, referrers_bonuses)
+
+        base_commands = [
+            BotCommand(command="start", description="Главное меню"),
+            BotCommand(command="me", description="Мой профиль"),
+            BotCommand(command="buy", description="Купить подписку"),
+            BotCommand(command="sub", description="Подписка"),
+            BotCommand(command="referral", description="Реферальная программа"),
+            BotCommand(command="help", description="Помощь"),
+        ]
+        await bot.set_my_commands(base_commands, scope=BotCommandScopeChat(chat_id=user.user_id))
+        logger.info(f"Ручная обработка платежа завершена для {user.user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка ручной выдачи: {e}")
+        await session.rollback()
 
 @router.callback_query(F.data == "buy")
 @router.message(Command("buy"))
@@ -43,11 +140,9 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
         callback = None
         user_id = message.from_user.id
 
-    # Получаем базовую цену из настроек
     base_price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
     base_price = float(base_price)
 
-    # Получаем пользователя
     result = await session.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
 
@@ -55,7 +150,6 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
         await message.answer("❌ Пользователь не найден. Нажмите /start")
         return
 
-    # Проверяем текущий статус подписки
     has_subscription = user.expire_date and user.expire_date > datetime.utcnow()
 
     text = "🛒 <b>Магазин подписок Nemo VPN</b>\n\n"
@@ -66,7 +160,6 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
         text += f"⭐️ <b>Ваша подписка активна ещё {days_left} дн.</b>\n"
         text += "Новая подписка продлит текущую.\n\n"
 
-    # Рассчитываем цены с учетом скидок
     prices = {}
     for key, period in SUBSCRIPTION_PERIODS.items():
         if "fixed_price" in period:
@@ -76,7 +169,6 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
             price = await calculate_tariff_price(session, base_price, months)
         prices[key] = price
 
-        # Рассчитываем экономию (если есть скидка)
         discount_text = ""
         if "fixed_price" not in period and period["months"] > 1:
             original_price = base_price * period["months"]
@@ -85,7 +177,6 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, ses
             discount_text = f" (экономия {savings}₽, {discount_percent}% скидка)"
         text += f"▪️ {period['days']} дней — {int(price)}₽{discount_text}\n"
 
-    # Используем answer вместо answer_video
     await message.answer(
         text=text,
         reply_markup=get_subscription_duration_keyboard(
@@ -108,7 +199,6 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
         await callback.answer("❌ Неверный тариф", show_alert=True)
         return
 
-    # Рассчитываем цену динамически
     base_price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
     base_price = float(base_price)
 
@@ -118,7 +208,6 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
         months = period["months"]
         price = await calculate_tariff_price(session, base_price, months)
 
-    # Сохраняем выбранный тариф
     await state.update_data(
         duration=duration,
         days=period["days"],
@@ -150,10 +239,10 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
 
     try:
         price_usdt = round(price_rub / settings.USDT_TO_RUB_RATE, 2)
-        
         bot_info = await callback.bot.get_me()
         bot_username = bot_info.username
 
+        # Временная запись для резервации ID
         payment_invoice = PaymentInvoice(
             user_id=user_id,
             invoice_id=f"temp_{user_id}_{int(datetime.utcnow().timestamp())}",
@@ -166,10 +255,9 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
         )
         session.add(payment_invoice)
         await session.flush()
-        await session.refresh(payment_invoice)
         order_id = payment_invoice.id
 
-        invoice_url = await crypto_bot_service.create_invoice(
+        result = await crypto_bot_service.create_invoice(
             amount_usdt=price_usdt,
             order_id=order_id,
             description=f"Nemo VPN подписка на {days} дней ({price_rub}₽)",
@@ -177,8 +265,14 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
             paid_btn_url=f"https://t.me/{bot_username}"
         )
 
-        if not invoice_url:
+        if not result:
             raise Exception("Не удалось создать счет в CryptoBot")
+
+        invoice_url, real_invoice_id = result
+
+        # Перезаписываем временный ID на настоящий от CryptoBot
+        payment_invoice.invoice_id = str(real_invoice_id)
+        await session.commit()
 
         await callback.message.edit_text(
             text=(
@@ -187,12 +281,12 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
                 f"📝 Заказ: <code>#{order_id}</code>\n\n"
                 "<i>Вы можете оплатить через USDT (TRC20, TON, BEP20) или Toncoin.</i>"
             ),
-            reply_markup=get_payment_keyboard(invoice_url, payment_invoice.invoice_id),
+            reply_markup=get_payment_keyboard(invoice_url, str(real_invoice_id)),
             parse_mode="HTML"
         )
         await state.update_data(order_id=str(order_id))
         await state.set_state("waiting_for_payment")
-        logger.info(f"Создан счет CryptoBot #{order_id} для пользователя {user_id}: {price_usdt} USDT")
+        logger.info(f"Создан счет CryptoBot #{order_id} (ID: {real_invoice_id}) для {user_id}: {price_usdt} USDT")
 
     except Exception as e:
         logger.error(f"Ошибка создания счета CryptoBot: {e}")
@@ -207,7 +301,6 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
     """Оплата банковской картой через Platega."""
     user_id = callback.from_user.id
     
-    # Получаем данные из состояния
     data = await state.get_data()
     price = data.get("price", settings.SUBSCRIPTION_PRICE_RUB)
     days = data.get("days", settings.SUBSCRIPTION_EXPIRE_DAYS)
@@ -227,7 +320,6 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
             description=f"Nemo VPN подписка на {days} дней"
         )
 
-        # Сохраняем счет в БД
         payment_invoice = PaymentInvoice(
             user_id=user_id,
             invoice_id=order_id,
@@ -269,30 +361,53 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
     user_id = callback.from_user.id
     invoice_id = callback.data.split(":")[1]
 
-    await callback.answer("⏳ Проверка оплаты...")
+    await callback.answer("⏳ Проверяем оплату...", show_alert=False)
 
-    # Получаем счет из БД
     result = await session.execute(
         select(PaymentInvoice).where(PaymentInvoice.invoice_id == invoice_id)
     )
     invoice = result.scalar_one_or_none()
 
     if not invoice:
-        await callback.answer("❌ Счет не найден", show_alert=True)
+        await callback.answer("❌ Счет не найден. Создайте новый счет.", show_alert=True)
         return
 
-    # Проверяем статус
     if invoice.status == "paid":
-        await callback.answer("✅ Оплата подтверждена!", show_alert=True)
-        return
-    if invoice.status == "pending":
-        await callback.answer("⏳ Оплата ещё не подтверждена. Подождите...", show_alert=True)
+        await callback.answer("✅ Оплата уже подтверждена!", show_alert=True)
         return
     if invoice.status == "expired":
         await callback.answer("❌ Срок действия счета истек", show_alert=True)
         return
 
-    await callback.answer()
+    # Ручная проверка статуса через API CryptoBot
+    if invoice.payment_method == "cryptobot":
+        try:
+            headers = {"Crypto-Pay-API-Token": settings.CRYPTO_BOT_TOKEN}
+            async with httpx.AsyncClient(verify=False) as client:
+                response = await client.get(
+                    "https://pay.crypt.bot/api/getInvoices",
+                    params={"invoice_ids": invoice_id},
+                    headers=headers,
+                    timeout=10.0
+                )
+                res_data = response.json()
+                if res_data.get("ok") and res_data.get("result", {}).get("items"):
+                    remote_invoice = res_data["result"]["items"][0]
+                    status = remote_invoice.get("status")
+                    
+                    if status == "paid":
+                        await _process_manual_payment(callback.bot, session, invoice)
+                        await callback.message.edit_text("✅ <b>Оплата подтверждена!</b> Подписка успешно выдана.", parse_mode="HTML")
+                        return
+                    elif status in ["expired", "deleted"]:
+                        invoice.status = "expired"
+                        await session.commit()
+                        await callback.message.edit_text("❌ <b>Счет отменен или просрочен.</b>", parse_mode="HTML")
+                        return
+        except Exception as e:
+            logger.error(f"Ошибка ручной проверки CryptoBot API: {e}")
+
+    await callback.answer("⏳ Оплата ещё не поступила. Если вы только что оплатили, подождите минутку...", show_alert=True)
 
 @router.callback_query(F.data == "cancel_payment")
 async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
