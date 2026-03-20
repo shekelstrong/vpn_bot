@@ -636,3 +636,34 @@ async def cmd_webhook_set(message: types.Message):
     except Exception as e:
         logger.error(f"Ошибка установки вебхука: {e}")
         await message.answer(f"❌ Ошибка: {e}")
+
+@router.message(F.video | F.animation | F.photo | F.document)
+async def catch_media_id(message: types.Message):
+    """Инструмент админа для получения file_id любого медиафайла."""
+    if not is_admin(message.from_user.id):
+        return
+    
+    file_id = None
+    media_type = "Медиа"
+    
+    if message.video:
+        file_id = message.video.file_id
+        media_type = "🎥 Видео"
+    elif message.animation:
+        file_id = message.animation.file_id
+        media_type = "🎞 GIF (Анимация)"
+    elif message.photo:
+        file_id = message.photo[-1].file_id
+        media_type = "📸 Фото"
+    elif message.document:
+        file_id = message.document.file_id
+        media_type = "📄 Документ"
+        
+    if file_id:
+        await message.reply(
+            f"{media_type} распознано!\n\n"
+            f"Вот ваш <code>file_id</code> для вставки в код:\n\n"
+            f"<code>{file_id}</code>\n\n"
+            f"<i>(Нажмите на код, чтобы скопировать)</i>",
+            parse_mode="HTML"
+        )
