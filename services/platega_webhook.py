@@ -2,6 +2,7 @@
 Обработчик webhook'ов Platega для автоматической выдачи подписок.
 Работает по аналогии с успешными проектами.
 """
+import json
 from aiogram import Bot
 from loguru import logger
 from datetime import datetime, timedelta
@@ -67,16 +68,18 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
     logger.info(f"🔄 Обработка платежа order_id={order_id}, amount={amount} {currency}")
 
     # Парсим order_id: формат "platega_{user_id}_{uuid}"
-    # Days берем из payload инвойса в БД
     parts = str(order_id).split("_")
     
     if len(parts) < 3:
         logger.error(f"Invalid order_id format: {order_id}")
         return False
 
-    # Формат: platega_{user_id}_{uuid}
     if parts[0] == "platega":
-        user_telegram_id = int(parts[1])
+        try:
+            user_telegram_id = int(parts[1])
+        except ValueError:
+            logger.error(f"Cannot parse user_id from order_id: {order_id}")
+            return False
     else:
         logger.error(f"Cannot parse order_id: {order_id}")
         return False
@@ -100,11 +103,10 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
         days = 30  # По умолчанию
         if invoice and invoice.payload:
             try:
-                import json
                 payload_data = json.loads(invoice.payload)
                 days = payload_data.get("days", 30)
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to parse invoice payload: {e}")
         else:
             # Если инвойса нет, пробуем найти по user_id последний pending
             recent = await session.execute(
@@ -117,11 +119,10 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             recent_invoice = recent.scalar_one_or_none()
             if recent_invoice and recent_invoice.payload:
                 try:
-                    import json
                     payload_data = json.loads(recent_invoice.payload)
                     days = payload_data.get("days", 30)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to parse recent invoice payload: {e}")
 
         logger.info(f"Payment: user={user_telegram_id}, days={days}, amount={amount}")
 
@@ -141,7 +142,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 currency="RUB",
                 payment_method="platega",
                 status="paid",
-                payload=f'{{"days": {days}}}',
+                payload=json.dumps({"days": days}),
                 created_at=datetime.utcnow()
             )
             session.add(invoice)
@@ -164,7 +165,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
 
         if is_extension:
             user.expire_date = user.expire_date + timedelta(days=days)
-            logger.info(f"Продление подписки с {user.expire_date} до {user.expire_date}")
+            logger.info(f"Продление подписки с {user.expire_date - timedelta(days=days)} до {user.expire_date}")
         else:
             user.expire_date = now + timedelta(days=days)
             logger.info(f"Новая подписка до {user.expire_date}")
@@ -202,51 +203,55 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 logger.info(f"✅ Marzban: создан пользователь {user.marzban_username}")
         except Exception as e:
             logger.error(f"❌ Marzban error: {e}")
-            # Не прерываем обработку, продолжаем с уведомлениями
+            # Не прерываем обработку, продолжаем с уведомлениями и сохранением в БД
 
-        # === РЕФЕРАЛЬНЫЕ БОНУСЫ (3 уровня: 15%, 10%, 5%) ===
+        # === РЕФЕРАЛЬНЫЕ БОНУСЫ (3 уровня) ===
         referrers_bonuses = []
-        percentages = settings.referral_percentages_list
-        current_referrer_id = user.referrer_id
+        try:
+            percentages = settings.referral_percentages_list
+            current_referrer_id = user.referrer_id
 
-        for level, pct in enumerate(percentages, 1):
-            if not current_referrer_id:
-                break
+            for level, pct in enumerate(percentages, 1):
+                if not current_referrer_id:
+                    break
 
-            ref_result = await session.execute(
-                select(User).where(User.user_id == current_referrer_id)
-            )
-            referrer = ref_result.scalar_one_or_none()
-
-            if not referrer:
-                break
-
-            bonus = float(amount) * (pct / 100.0)
-            referrer.referral_balance += bonus
-
-            referrers_bonuses.append({
-                'level': level,
-                'id': referrer.user_id,
-                'username': referrer.username,
-                'bonus': bonus
-            })
-
-            # Уведомляем рефовода
-            try:
-                await bot.send_message(
-                    referrer.user_id,
-                    f"💸 <b>Реферальное начисление!</b>\n\n"
-                    f"Ваш реферал (ID: {user_telegram_id}) пополнил баланс.\n"
-                    f"Вам начислено: <b>+{bonus:.2f}₽</b> ({level} уровень, {pct}%)\n\n"
-                    f"Реферальный баланс: {referrer.referral_balance}₽",
-                    parse_mode="HTML"
+                ref_result = await session.execute(
+                    select(User).where(User.user_id == current_referrer_id)
                 )
-                logger.info(f"✅ Рефовод {referrer.user_id} уведомлен (уровень {level}, +{bonus:.2f}₽)")
-            except Exception as e:
-                logger.warning(f"Failed to notify referrer {referrer.user_id}: {e}")
+                referrer = ref_result.scalar_one_or_none()
 
-            current_referrer_id = referrer.referrer_id
+                if not referrer:
+                    break
 
+                bonus = float(amount) * (pct / 100.0)
+                referrer.referral_balance += bonus
+
+                referrers_bonuses.append({
+                    'level': level,
+                    'id': referrer.user_id,
+                    'username': referrer.username,
+                    'bonus': bonus
+                })
+
+                # Уведомляем рефовода
+                try:
+                    await bot.send_message(
+                        referrer.user_id,
+                        f"💸 <b>Реферальное начисление!</b>\n\n"
+                        f"Ваш реферал (ID: {user_telegram_id}) пополнил баланс.\n"
+                        f"Вам начислено: <b>+{bonus:.2f}₽</b> ({level} уровень, {pct}%)\n\n"
+                        f"Реферальный баланс: {referrer.referral_balance:.2f}₽",
+                        parse_mode="HTML"
+                    )
+                    logger.info(f"✅ Рефовод {referrer.user_id} уведомлен (уровень {level}, +{bonus:.2f}₽)")
+                except Exception as e:
+                    logger.warning(f"Failed to notify referrer {referrer.user_id}: {e}")
+
+                current_referrer_id = referrer.referrer_id
+        except Exception as e:
+            logger.error(f"Ошибка при начислении реферальных: {e}")
+
+        # Фиксируем все изменения в БД (выдача дней, бонусы, инвойс)
         await session.commit()
 
         # === УВЕДОМЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ===
@@ -259,7 +264,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 user_telegram_id,
                 f"✅ <b>Оплата прошла успешно!</b>\n\n"
                 f"💎 Подписка: <b>{days} дней</b>\n"
-                f"💰 Сумма: <b>{amount:.2f} {currency}</b> (Platega)\n"
+                f"💰 Сумма: <b>{amount:.2f} {currency}</b>\n"
                 f"{subscription_info}\n"
                 f"Спасибо за покупку! 🎉",
                 parse_mode="HTML"
@@ -269,28 +274,31 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             logger.error(f"Failed to notify user {user_telegram_id}: {e}")
 
         # === УВЕДОМЛЕНИЕ АДМИНОВ ===
-        user_display = f" @{user.username}" if user.username else f"ID: {user_telegram_id}"
-        
-        referrer_line = "\n👥 Рефовод: Нет"
-        if referrers_bonuses:
-            ref_info = referrers_bonuses[0]
-            ref_link = f" @{ref_info['username']}" if ref_info['username'] else f"ID: {ref_info['id']}"
-            referrer_line = f"\n👥 Рефовод: {ref_link} (+{ref_info['bonus']:.2f}₽)"
+        try:
+            user_display = f" @{user.username}" if user.username else f"ID: {user_telegram_id}"
+            
+            referrer_line = "\n👥 Рефовод: Нет"
+            if referrers_bonuses:
+                ref_info = referrers_bonuses[0]
+                ref_link = f" @{ref_info['username']}" if ref_info['username'] else f"ID: {ref_info['id']}"
+                referrer_line = f"\n👥 Рефовод: {ref_link} (+{ref_info['bonus']:.2f}₽)"
 
-        admin_msg = (
-            f"💰 <b>Новое пополнение! (Platega)</b>\n\n"
-            f"🆔 ID: <code>{user_telegram_id}</code>\n"
-            f"👤 Профиль: {user_display}\n"
-            f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
-            f"📦 Подписка: <b>{days} дней</b>"
-            f"{referrer_line}"
-        )
+            admin_msg = (
+                f"💰 <b>Новое пополнение! (Platega)</b>\n\n"
+                f"🆔 ID: <code>{user_telegram_id}</code>\n"
+                f"👤 Профиль: {user_display}\n"
+                f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
+                f"📦 Подписка: <b>{days} дней</b>"
+                f"{referrer_line}"
+            )
 
-        for admin_id in settings.admin_ids_list:
-            try:
-                await bot.send_message(admin_id, admin_msg, parse_mode="HTML")
-            except Exception as e:
-                logger.warning(f"Failed to notify admin {admin_id}: {e}")
+            for admin_id in settings.admin_ids_list:
+                try:
+                    await bot.send_message(admin_id, admin_msg, parse_mode="HTML")
+                except Exception as e:
+                    logger.warning(f"Failed to notify admin {admin_id}: {e}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке уведомления админу: {e}")
 
         logger.info(
             f"✅ Platega payment: User {user_telegram_id} +{days} days | "

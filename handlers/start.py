@@ -43,24 +43,25 @@ async def edit_message_content(
     reply_markup = None,
     parse_mode: str = None
 ):
-    """Универсальная функция для редактирования сообщения (текст или видео)."""
+    """Универсальная функция для редактирования сообщения (текст или медиа)."""
     msg = message_or_callback if isinstance(message_or_callback, Message) else message_or_callback.message
+    
+    # Определяем итоговый текст (выбираем то, что не None)
+    final_text = text if text is not None else caption
+    
     try:
-        if hasattr(msg, 'video') and msg.video and caption:
+        # Проверяем, содержит ли сообщение медиа. Если да - мы обязаны менять caption!
+        has_media = bool(msg.video or msg.animation or msg.photo or msg.document)
+        
+        if has_media:
             await msg.edit_caption(
-                caption=caption,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode
-            )
-        elif hasattr(msg, 'animation') and msg.animation and caption:
-            await msg.edit_caption(
-                caption=caption,
+                caption=final_text,
                 reply_markup=reply_markup,
                 parse_mode=parse_mode
             )
         else:
             await msg.edit_text(
-                text=text,
+                text=final_text,
                 reply_markup=reply_markup,
                 parse_mode=parse_mode
             )
