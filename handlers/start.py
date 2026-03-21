@@ -19,22 +19,22 @@ router = Router(name="start_router")
 @router.message(F.animation)
 async def get_media_file_id_animation(message: Message):
     """Временный хэндлер для получения file_id анимаций (GIF)."""
-    await message.answer(f"Анимация (GIF) file_id:\n`{message.animation.file_id}`", parse_mode="Markdown")
+    await message.answer(f"Анимация (GIF) file_id:\n<code>{message.animation.file_id}</code>", parse_mode="HTML")
 
 @router.message(F.video)
 async def get_media_file_id_video(message: Message):
     """Временный хэндлер для получения file_id видео."""
-    await message.answer(f"Видео file_id:\n`{message.video.file_id}`", parse_mode="Markdown")
+    await message.answer(f"Видео file_id:\n<code>{message.video.file_id}</code>", parse_mode="HTML")
 
 @router.message(F.photo)
 async def get_media_file_id_photo(message: Message):
     """Временный хэндлер для получения file_id фото."""
-    await message.answer(f"Фото file_id:\n`{message.photo[-1].file_id}`", parse_mode="Markdown")
+    await message.answer(f"Фото file_id:\n<code>{message.photo[-1].file_id}</code>", parse_mode="HTML")
 
 @router.message(F.document)
 async def get_media_file_id_document(message: Message):
     """Временный хэндлер для получения file_id документа."""
-    await message.answer(f"Документ file_id:\n`{message.document.file_id}`", parse_mode="Markdown")
+    await message.answer(f"Документ file_id:\n<code>{message.document.file_id}</code>", parse_mode="HTML")
 
 async def edit_message_content(
     message_or_callback: Message | CallbackQuery,
@@ -225,6 +225,7 @@ async def back_to_main(callback: CallbackQuery, session: AsyncSession):
     await edit_message_content(
         callback,
         text="<b>Главное меню Nemo VPN</b>\n\nВыберите действие:",
+        caption="<b>Главное меню Nemo VPN</b>\n\nВыберите действие:",
         reply_markup=get_main_menu_keyboard(show_trial=show_trial),
         parse_mode="HTML"
     )

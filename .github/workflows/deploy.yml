@@ -20,9 +20,12 @@ jobs:
             # Переходим в папку с проектом
             cd ~/projects/vpn_bot
 
-            # Сбрасываем любые случайные изменения на сервере и скачиваем свежий код
-            git reset --hard HEAD
-            git pull
+            # Даем серверу временный токен доступа к приватному репозиторию
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+            
+            # Жестко принудительно синхронизируем сервер с GitHub
+            git fetch origin
+            git reset --hard origin/main
 
             # Создаем папку для логов и выдаем права, чтобы бот мог туда писать
             mkdir -p logs
