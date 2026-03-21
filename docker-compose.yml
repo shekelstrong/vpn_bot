@@ -5,8 +5,7 @@ services:
     restart: always
     env_file:
       - .env
-    volumes:
-      - .:/app
+    # Volume убран для корректной работы - файлы копируются при сборке образа
     depends_on:
       - nemo_vpn_db
       - nemo_vpn_redis
@@ -20,8 +19,7 @@ services:
     restart: always
     env_file:
       - .env
-    volumes:
-      - .:/app
+    # Volume убран для корректной работы - файлы копируются при сборке образа
     # Порт 8080 виден только внутри сети Docker для Nginx
     expose:
       - "8080"
