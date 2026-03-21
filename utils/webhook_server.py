@@ -13,8 +13,6 @@ from typing import Callable
 from aiohttp import web
 from loguru import logger
 
-from database.db import db
-from database.session import async_session_maker
 from services.platega_webhook import handle_platega_webhook_update
 from config import settings
 
