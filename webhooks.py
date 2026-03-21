@@ -51,20 +51,7 @@ logger.add(
 )
 
 def validate_webhook_signature(body_text: str, signature: str, token: Optional[str] = None) -> bool:
-    """
-    Проверить HMAC-SHA256 подпись webhook CryptoBot.
-
-    Формула: header['crypto-pay-api-signature'] == hmac_sha256(secret, body)
-    где secret = sha256(api_token)
-
-    Args:
-        body_text: Тело запроса в виде строки
-        signature: Значение из заголовка 'crypto-pay-api-signature'
-        token: API токен (опционально, берется из настроек если не указан)
-
-    Returns:
-        bool: True если подпись валидна, иначе False
-    """
+    """Проверить HMAC-SHA256 подпись webhook CryptoBot."""
     if token is None:
         token = settings.CRYPTO_BOT_TOKEN
 
@@ -97,24 +84,33 @@ class WebhookHandler:
     """Обработчик вебхуков с логикой распределения прибыли."""
 
     def __init__(self):
-        # ИСПРАВЛЕНИЕ: Берем фабрику сессий напрямую из движка бота (SQLite)
         self.session_factory = get_session_factory()
 
+    async def handle_pay_success(self, request: web.Request) -> web.Response:
+        """Обработчик возврата пользователя после успешной оплаты."""
+        order_id = request.query.get('order_id')
+        if order_id:
+            redirect_url = f"https://t.me/nemo_vpn_bot?start=pay_success_{order_id}"
+        else:
+            redirect_url = "https://t.me/nemo_vpn_bot"
+        raise web.HTTPSeeOther(redirect_url)
+
+    async def handle_pay_failed(self, request: web.Request) -> web.Response:
+        """Обработчик возврата пользователя после неудачной оплаты."""
+        redirect_url = "https://t.me/nemo_vpn_bot?start=pay_failed"
+        raise web.HTTPSeeOther(redirect_url)
+
     async def handle_crypto_webhook(self, request: web.Request) -> web.Response:
-        """Обработка вебхука от CryptoBot (по аналогии с рабочим проектом)."""
+        """Обработка вебхука от CryptoBot."""
         logger.info("=" * 50)
         logger.info("🪙 CryptoBot webhook получен!")
         logger.info(f"URL: {request.url}")
         logger.info(f"Method: {request.method}")
-        logger.info(f"Headers: {dict(request.headers)}")
-
+        
         try:
             body_bytes = await request.read()
             body_text = body_bytes.decode('utf-8')
-            logger.info(f"Body length: {len(body_bytes)}")
-
             signature = request.headers.get('crypto-pay-api-signature')
-            logger.info(f"Signature: {signature[:20] if signature else 'None'}...")
 
             if settings.CRYPTO_BOT_TOKEN and signature:
                 if not check_webhook_signature(body_text, signature, settings.CRYPTO_BOT_TOKEN):
@@ -122,15 +118,12 @@ class WebhookHandler:
                     return web.json_response({"error": "Invalid signature"}, status=403)
 
             data = await request.json()
-            logger.info(f"🪙 CRYPTOBOT DATA: {data}")
-
+            
             if data.get("update_type") != "invoice_paid":
                 return web.json_response({"status": "ok", "msg": "ignored type"})
 
             invoice = data.get("payload", {})
             order_id_str = invoice.get("payload")
-            amount_usdt = invoice.get("amount")
-            asset = invoice.get("asset", "USDT")
             invoice_id = invoice.get("invoice_id")
 
             if not order_id_str:
@@ -140,7 +133,6 @@ class WebhookHandler:
             try:
                 order_id = int(order_id_str)
             except ValueError:
-                logger.error(f"Некорректный order_id: {order_id_str}")
                 return web.json_response({"status": "ok"})
 
             async with self.session_factory() as session:
@@ -150,11 +142,9 @@ class WebhookHandler:
                 payment_invoice = result.scalar_one_or_none()
 
                 if not payment_invoice:
-                    logger.error(f"PaymentInvoice не найден для order_id: {order_id}")
                     return web.json_response({"status": "ok"})
 
                 if payment_invoice.status == "paid":
-                    logger.info(f"Платеж #{order_id} уже обработан")
                     return web.json_response({"status": "ok"})
 
                 payment_invoice.status = "paid"
@@ -167,7 +157,6 @@ class WebhookHandler:
 
                 if payment_invoice.payload:
                     try:
-                        import json
                         payload = json.loads(payment_invoice.payload)
                         days = payload.get("days", 30)
                     except:
@@ -186,59 +175,48 @@ class WebhookHandler:
 
         except Exception as e:
             logger.error(f"CryptoBot webhook error: {e}")
-            import traceback
-            logger.error(f"Traceback:\n{traceback.format_exc()}")
             return web.json_response({"error": str(e)}, status=500)
 
     async def handle_platega_webhook(self, request: web.Request) -> web.Response:
         """Обработка вебхука от Platega."""
         try:
-            data = await request.json()
-            signature = request.headers.get('X-Platega-Signature', '')
-            logger.info(f"Platega webhook: {data}")
+            try:
+                data = await request.json()
+            except json.JSONDecodeError:
+                form_data = await request.post()
+                data = dict(form_data)
+                logger.info(f"💰 PLATEGA WEBHOOK (form-data): {data}")
 
-            payment_data = platega_service.parse_webhook(data, signature)
+            logger.info(f"💰 PLATEGA WEBHOOK: {data}")
 
-            if not payment_data or payment_data.status != 'success':
-                return web.json_response({"status": "ok"})
+            status = str(data.get("status") or data.get("Status") or data.get("STATUS", "")).upper()
 
-            tg_user_id = int(payment_data.custom_id) if payment_data.custom_id else None
+            if status not in ("CONFIRMED", "SUCCESS", "PAID", "COMPLETED"):
+                logger.info(f"Ignoring payment status: {status}")
+                return web.json_response({"status": "ignored"})
 
-            if not tg_user_id:
-                return web.json_response({"error": "User not found"}, status=404)
+            order_id = data.get("payload") or data.get("order_id") or data.get("orderId") or data.get("merchant_order_id")
 
-            days = 30
-            payment_id = payment_data.payment_id or ""
+            if not order_id:
+                logger.error("No payload/order_id in webhook data")
+                return web.json_response({"status": "error", "msg": "no payload"}, status=400)
 
-            if payment_id:
-                async with self.session_factory() as session:
-                    result = await session.execute(
-                        select(PaymentInvoice).where(PaymentInvoice.invoice_id == payment_id)
-                    )
-                    invoice = result.scalar_one_or_none()
+            # Передаем обработку в правильный сервис, чтобы не дублировать код
+            from services.platega_webhook import handle_platega_webhook_update
+            from aiogram import Bot
+            
+            bot = Bot(token=settings.BOT_TOKEN)
+            result = await handle_platega_webhook_update(data, bot)
+            await bot.session.close()
 
-                    if invoice and invoice.payload:
-                        try:
-                            import json
-                            payload = json.loads(invoice.payload)
-                            days = payload.get("days", 30)
-                        except:
-                            pass
+            return web.json_response(result)
 
-            await self.process_payment(
-                tg_user_id=tg_user_id,
-                amount=payment_data.amount,
-                currency=payment_data.currency,
-                payment_method='platega',
-                payment_id=payment_id,
-                days=days
-            )
-
-            return web.json_response({"status": "ok"})
-
+        except json.JSONDecodeError:
+            logger.error("Invalid JSON in webhook")
+            return web.json_response({"status": "error", "msg": "invalid json"}, status=400)
         except Exception as e:
-            logger.error(f"Platega webhook error: {e}")
-            return web.json_response({"error": str(e)}, status=500)
+            logger.exception(f"Webhook error: {e}")
+            return web.json_response({"status": "error", "msg": str(e)}, status=500)
 
     async def process_payment(
         self,
@@ -296,20 +274,16 @@ class WebhookHandler:
 
                 for level, pct in enumerate(percentages, 1):
                     if not current_referrer_id:
-                        break # Цепочка прервалась
+                        break
 
-                    # Получаем рефовода уровня N
                     ref_res = await session.execute(select(User).where(User.user_id == current_referrer_id))
                     referrer = ref_res.scalar_one_or_none()
 
                     if not referrer:
                         break
 
-                    # Начисляем бонус
                     bonus_amount = amount * (pct / 100)
                     referrer.referral_balance += bonus_amount
-
-                    # Сохраняем инфо для админского отчета
                     referrers_bonuses.append({
                         'level': level,
                         'id': referrer.user_id,
@@ -317,7 +291,6 @@ class WebhookHandler:
                         'bonus': bonus_amount
                     })
 
-                    # Уведомляем рефовода о бонусе
                     await notify_referrer_payment(
                         bot=bot,
                         referrer_id=referrer.user_id,
@@ -327,7 +300,6 @@ class WebhookHandler:
                         referral_username=user.username
                     )
 
-                    # Переходим к следующему уровню (рефовод рефовода)
                     current_referrer_id = referrer.referrer_id
 
                 # 6. Обновляем Marzban
@@ -342,12 +314,11 @@ class WebhookHandler:
                 if marzban_account_exists:
                     await marzban_service.update_user_expiry(user.marzban_username, days)
                 else:
-                    # Создаем новый аккаунт если его нет (или был удален триал)
                     new_acc = await marzban_service.create_user(
                         tg_id=tg_user_id,
                         username=user.username,
                         expire_days=days,
-                        data_limit_gb=0.0 # Безлимит для платных
+                        data_limit_gb=0.0
                     )
                     user.marzban_username = new_acc.get('username')
 
@@ -355,7 +326,6 @@ class WebhookHandler:
                 logger.info(f"Payment processed and bonuses distributed for user {tg_user_id}")
 
                 # 7. Финальные уведомления (Юзеру и Админу)
-                # ИСПРАВЛЕНИЕ: Добавлен is_extension, чтобы ссылка 100% прилетала
                 await notify_user_purchase(
                     bot=bot,
                     user_id=tg_user_id,
@@ -374,26 +344,6 @@ class WebhookHandler:
                     referrers_bonuses=referrers_bonuses if referrers_bonuses else None
                 )
 
-                # 8. Скрываем команду /trial у пользователя с активной подпиской
-                # ИСПРАВЛЕНИЕ: Этот блок закомментирован, так как именно он 
-                # стирал кнопку /admin у администраторов!
-                """
-                from aiogram.types import BotCommand, BotCommandScopeChat
-                base_commands = [
-                    BotCommand(command="start", description="Главное меню"),
-                    BotCommand(command="me", description="Мой профиль"),
-                    BotCommand(command="buy", description="Купить подписку"),
-                    BotCommand(command="sub", description="Подписка"),
-                    BotCommand(command="referral", description="Реферальная программа"),
-                    BotCommand(command="help", description="Помощь"),
-                ]
-                await bot.set_my_commands(
-                    base_commands,
-                    scope=BotCommandScopeChat(chat_id=tg_user_id)
-                )
-                logger.info(f"Команда /trial скрыта для пользователя {tg_user_id}")
-                """
-
             except Exception as e:
                 logger.error(f"Error in process_payment: {e}")
                 await session.rollback()
@@ -404,12 +354,20 @@ class WebhookHandler:
         return web.json_response({"status": "ok"})
 
 async def run_webhooks():
-    await init_db() # Инициализируем движок SQLite перед запуском
-    
+    await init_db()
+
     handler = WebhookHandler()
     app = web.Application()
+    
+    # Роуты вебхуков
     app.router.add_post('/cryptopay', handler.handle_crypto_webhook)
     app.router.add_post('/platega-webhook', handler.handle_platega_webhook)
+    app.router.add_post('/webhook/platega', handler.handle_platega_webhook)
+    
+    # Роуты возврата пользователя (чтобы не было 521/404)
+    app.router.add_get('/pay_success', handler.handle_pay_success)
+    app.router.add_get('/pay_failed', handler.handle_pay_failed)
+    
     app.router.add_get('/health', handler.health_check)
 
     runner = web.AppRunner(app)
@@ -421,7 +379,7 @@ async def run_webhooks():
     logger.info("Вебхук-сервер Nemo VPN запущен (Порт 8080) (SQLite)!")
     logger.info("Webhooks:")
     logger.info("  - https://dealflow.bond/cryptopay (CryptoBot)")
-    logger.info("  - https://dealflow.bond/platega-webhook (Platega)")
+    logger.info("  - https://dealflow.bond/webhook/platega (Platega)")
     logger.info("=" * 50)
 
     try:
