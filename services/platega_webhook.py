@@ -266,4 +266,6 @@ async def issue_subscription(
 
     except Exception as e:
         logger.error(f"Ошибка выдачи подписки/уведомлений: {e}")
+        import traceback
+        logger.error(f"Traceback:\n{traceback.format_exc()}")
         raise

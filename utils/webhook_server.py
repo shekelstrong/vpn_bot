@@ -39,24 +39,164 @@ class WebhookServer:
     async def handle_pay_success(self, request: web.Request) -> web.Response:
         """
         Обработчик возврата пользователя после успешной оплаты.
-        Перенаправляет в бота с параметром для отображения успеха.
+        Показывает HTML-страницу с сообщением об успехе.
         """
         order_id = request.query.get('order_id')
-
-        if order_id:
-            redirect_url = f"https://t.me/{(await self.bot.get_me()).username}?start=pay_success_{order_id}"
-        else:
-            redirect_url = f"https://t.me/{(await self.bot.get_me()).username}"
-
-        raise web.HTTPSeeOther(redirect_url)
+        
+        html_content = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Оплата успешна</title>
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    margin: 0;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                }
+                .container {
+                    text-align: center;
+                    background: white;
+                    padding: 40px;
+                    border-radius: 20px;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                    max-width: 400px;
+                }
+                .checkmark {
+                    width: 80px;
+                    height: 80px;
+                    background: #4CAF50;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 20px;
+                    font-size: 40px;
+                    color: white;
+                }
+                h1 {
+                    color: #333;
+                    margin: 0 0 10px;
+                }
+                p {
+                    color: #666;
+                    line-height: 1.5;
+                }
+                .btn {
+                    display: inline-block;
+                    margin-top: 20px;
+                    padding: 12px 30px;
+                    background: #667eea;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 25px;
+                    font-weight: 600;
+                    transition: transform 0.2s;
+                }
+                .btn:hover {
+                    transform: scale(1.05);
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="checkmark">✓</div>
+                <h1>Оплата успешна!</h1>
+                <p>Ваша подписка активирована автоматически.</p>
+                <p>Проверьте Telegram - там должно быть сообщение с доступом к VPN.</p>
+                <a href="https://t.me/""" + (await self.bot.get_me()).username + """" class="btn">Открыть бота</a>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return web.Response(text=html_content, content_type='text/html')
 
     async def handle_pay_failed(self, request: web.Request) -> web.Response:
         """
         Обработчик возврата пользователя после неудачной оплаты.
-        Перенаправляет в бота с параметром для отображения ошибки.
+        Показывает HTML-страницу с сообщением об ошибке.
         """
-        redirect_url = f"https://t.me/{(await self.bot.get_me()).username}?start=pay_failed"
-        raise web.HTTPSeeOther(redirect_url)
+        html_content = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Оплата не удалась</title>
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    min-height: 100vh;
+                    margin: 0;
+                    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                }
+                .container {
+                    text-align: center;
+                    background: white;
+                    padding: 40px;
+                    border-radius: 20px;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                    max-width: 400px;
+                }
+                .cross {
+                    width: 80px;
+                    height: 80px;
+                    background: #f5576c;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 20px;
+                    font-size: 40px;
+                    color: white;
+                }
+                h1 {
+                    color: #333;
+                    margin: 0 0 10px;
+                }
+                p {
+                    color: #666;
+                    line-height: 1.5;
+                }
+                .btn {
+                    display: inline-block;
+                    margin-top: 20px;
+                    padding: 12px 30px;
+                    background: #f5576c;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 25px;
+                    font-weight: 600;
+                    transition: transform 0.2s;
+                }
+                .btn:hover {
+                    transform: scale(1.05);
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="cross">✕</div>
+                <h1>Оплата не удалась</h1>
+                <p>Платеж был отменен или не прошел.</p>
+                <p>Вы можете попробовать еще раз или обратиться в поддержку.</p>
+                <a href="https://t.me/""" + (await self.bot.get_me()).username + """" class="btn">Открыть бота</a>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return web.Response(text=html_content, content_type='text/html')
 
     async def handle_platega_webhook(self, request: web.Request) -> web.Response:
         """

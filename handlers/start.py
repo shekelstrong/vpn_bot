@@ -83,20 +83,10 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot):
     command_args = message.text.split()[1] if len(message.text.split()) > 1 else None
     referrer_id = None
 
-    if command_args:
-        # ОБРАБОТКА ВОЗВРАТА ПОСЛЕ ОПЛАТЫ - просто информируем, вебхук уже всё обработал
-        if command_args.startswith("pay_success_"):
-            await message.answer("✅ Оплата прошла успешно! Подписка уже активирована.", parse_mode="HTML")
-            return  # Выходим, чтобы не регистрировать пользователя заново
-
-        elif command_args == "pay_failed":
-            await message.answer("❌ Оплата не удалась или была отменена.", parse_mode="HTML")
-            return  # Выходим
-
-        elif command_args.isdigit():
-            ref_id_candidate = int(command_args)
-            if ref_id_candidate != user_id:  # Защита от регистрации по своей же ссылке
-                referrer_id = ref_id_candidate
+    if command_args and command_args.isdigit():
+        ref_id_candidate = int(command_args)
+        if ref_id_candidate != user_id:  # Защита от регистрации по своей же ссылке
+            referrer_id = ref_id_candidate
 
     # Проверяем, существует ли пользователь в базе
     result = await session.execute(select(User).where(User.user_id == user_id))
