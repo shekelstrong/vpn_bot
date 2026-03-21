@@ -1,72 +1,70 @@
 """
 Обработчик webhook'ов Platega для автоматической выдачи подписок.
 """
-
 from aiogram import Bot
 from loguru import logger
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
+
 from config import settings
-from database.models import User, PaymentInvoice
+from database.models import User, PaymentInvoice, Transaction
 from services.marzban_api import marzban_service
 from sqlalchemy import select
-
+from database.engine import get_session_factory
 
 async def handle_platega_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[str, str]:
     """
     Обработать обновление от Platega webhook.
-
+    
     Args:
         data: Данные вебхука от Platega
         bot: Экземпляр Telegram бота
-
+        
     Returns:
         Dict: {"status": "ok"} или {"error": "сообщение"}
     """
     logger.info("=" * 50)
     logger.info("Platega webhook получен")
     logger.info("=" * 50)
-
+    
     try:
-        # Получаем статус платежа
-        status = str(data.get("status") or data.get("Status") or "").upper()
-
+        # Получаем статус платежа (улучшенный парсинг, устойчивый к разным регистрам ключей Platega)
+        status = str(data.get("status") or data.get("Status") or data.get("STATUS", "")).upper()
+        
         # Обрабатываем только успешные платежи
         if status not in ("CONFIRMED", "SUCCESS", "PAID", "COMPLETED"):
             logger.info(f"Ignoring payment status: {status}")
             return {"status": "ok", "message": "Статус не требует обработки"}
 
-        # Получаем ID заказа (payload)
-        order_id = data.get("payload") or data.get("order_id") or data.get("orderId")
+        # Получаем ID заказа (улучшенный парсинг ключей)
+        order_id = data.get("payload") or data.get("order_id") or data.get("orderId") or data.get("merchant_order_id")
+        
         if not order_id:
             logger.error("No payload/order_id in webhook data")
             return {"status": "error", "message": "Отсутствует order_id"}
 
         # Получаем сумму
-        amount = float(data.get("amount") or data.get("Amount") or 0)
-        currency = data.get("currency") or "RUB"
-
+        amount = float(str(data.get("amount") or data.get("Amount") or data.get("total") or 0))
+        currency = data.get("currency") or data.get("Currency") or "RUB"
+        
         logger.info(f"Платеж Platega:")
         logger.info(f"  Order ID: {order_id}")
         logger.info(f"  Amount: {amount} {currency}")
         logger.info(f"  Status: {status}")
 
         # Парсим order_id: формат "platega_{user_id}_{uuid}"
-        # В handlers/buy.py создается как: f"platega_{user_id}_{uuid.uuid4().hex[:8]}"
         parts = str(order_id).split("_")
         if len(parts) < 3:
             logger.error(f"Invalid order_id format: {order_id}")
             return {"status": "error", "message": "Неверный формат order_id"}
-
+            
         user_id = int(parts[1])
 
         # Получаем пользователя из базы данных
-        from database.engine import get_session_factory
-
         async with get_session_factory()() as session:
             result = await session.execute(select(User).where(User.user_id == user_id))
             user = result.scalar_one_or_none()
-
+            
             if not user:
                 logger.error(f"Пользователь {user_id} не найден в базе данных")
                 return {"status": "error", "message": "Пользователь не найден"}
@@ -76,7 +74,7 @@ async def handle_platega_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[
                 select(PaymentInvoice).where(PaymentInvoice.invoice_id == str(order_id))
             )
             existing = existing_invoice.scalar_one_or_none()
-
+            
             if existing and existing.status == "paid":
                 logger.info(f"Счет {order_id} уже был обработан")
                 return {"status": "ok", "message": "Уже обработан"}
@@ -109,10 +107,10 @@ async def handle_platega_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[
                     created_at=datetime.utcnow()
                 )
                 session.add(new_invoice)
-
+                
             logger.info(f"Счет {order_id} обновлен на статус 'paid'")
 
-            # ВЫДАЧА ПОДПИСКИ
+            # ВЫДАЧА ПОДПИСКИ И НАЧИСЛЕНИЕ БОНУСОВ
             await issue_subscription(
                 bot=bot,
                 user=user,
@@ -125,11 +123,10 @@ async def handle_platega_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[
             logger.info("=" * 50)
             logger.info(f"✅ Подписка выдана пользователю {user_id} на {days} дней")
             logger.info("=" * 50)
-
+            
             await session.commit()
-
             return {"status": "ok", "message": "Подписка выдана"}
-
+            
     except Exception as e:
         logger.error(f"❌ Ошибка обработки webhook: {e}")
         import traceback
@@ -146,22 +143,15 @@ async def issue_subscription(
     amount_rub: float
 ):
     """
-    Выдать подписку пользователю.
-
-    Args:
-        bot: Экземпляр Telegram бота
-        user: Пользователь из базы данных
-        days: Срок подписки в днях
-        session: Сессия базы данных
-        payment_id: ID платежа
-        amount_rub: Сумма платежа в рублях
+    Выдать подписку пользователю, начислить бонусы и уведомить всех.
     """
     logger.info(f"Выдача подписки пользователю {user.user_id} на {days} дней")
-
+    
     # Рассчитываем новую дату окончания
     now = datetime.utcnow()
-
-    if user.expire_date and user.expire_date > now:
+    is_extension = bool(user.expire_date and user.expire_date > now)
+    
+    if is_extension:
         # Если подписка уже активна - продлеваем
         new_expire_date = user.expire_date + timedelta(days=days)
         logger.info(f"Продление подписки с {user.expire_date} до {new_expire_date}")
@@ -169,33 +159,40 @@ async def issue_subscription(
         # Если подписка не активна или истекла - задаем новую
         new_expire_date = now + timedelta(days=days)
         logger.info(f"Новая подписка с {now} до {new_expire_date}")
-
+        
     user.expire_date = new_expire_date
 
-    # Распределяем реферальные бонусы
+    # Распределяем реферальные бонусы по уровням
     referrers_bonuses = []
     percentages = settings.referral_percentages_list
     current_referrer_id = user.referrer_id
-
+    
     for level, pct in enumerate(percentages, 1):
         if not current_referrer_id:
             break
+            
         ref_res = await session.execute(select(User).where(User.user_id == current_referrer_id))
         referrer = ref_res.scalar_one_or_none()
+        
         if not referrer:
             break
-
-        bonus = amount_rub * (pct / 100)
+            
+        bonus = float(amount_rub) * (pct / 100.0)
         referrer.referral_balance += bonus
+        
         referrers_bonuses.append({
-            'level': level, 'id': referrer.user_id, 'username': referrer.username, 'bonus': bonus
+            'level': level,
+            'id': referrer.user_id,
+            'username': referrer.username,
+            'bonus': bonus
         })
+        
         from handlers.admin.notifications import notify_referrer_payment
         await notify_referrer_payment(bot, referrer.user_id, user.user_id, bonus, level, user.username)
+        
         current_referrer_id = referrer.referrer_id
 
     # Создаем запись о транзакции
-    from database.models import Transaction
     transaction = Transaction(
         user_id=user.user_id,
         amount=amount_rub,
@@ -212,7 +209,6 @@ async def issue_subscription(
         if user.marzban_username:
             try:
                 marzban_user = await marzban_service.get_user(user.marzban_username)
-
                 if marzban_user:
                     await marzban_service.update_user_expiry(
                         username=user.marzban_username,
@@ -253,14 +249,21 @@ async def issue_subscription(
             user_id=user.user_id,
             amount_rub=amount_rub,
             duration_days=days,
-            is_extension=(user.expire_date and user.expire_date > now) != new_expire_date,
+            is_extension=is_extension,
             marzban_username=user.marzban_username
         )
 
         # Отправляем уведомление админам
         from handlers.admin.notifications import notify_admin_payment
-        await notify_admin_payment(bot, user.user_id, amount_rub, user.username, "Platega", referrers_bonuses)
+        await notify_admin_payment(
+            bot=bot, 
+            user_id=user.user_id, 
+            amount_rub=amount_rub, 
+            username=user.username, 
+            method="Platega", 
+            referrers_bonuses=referrers_bonuses
+        )
 
     except Exception as e:
-        logger.error(f"Ошибка выдачи подписки: {e}")
+        logger.error(f"Ошибка выдачи подписки/уведомлений: {e}")
         raise
