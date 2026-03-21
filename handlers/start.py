@@ -15,27 +15,6 @@ from handlers.admin.notifications import notify_admin_new_user, notify_referrer_
 
 router = Router(name="start_router")
 
-# ВРЕМЕННЫЙ ХЭНДЛЕР ДЛЯ ПОЛУЧЕНИЯ FILE_ID (УДАЛИТЬ ПОСЛЕ НАСТРОЙКИ)
-@router.message(F.animation)
-async def get_media_file_id_animation(message: Message):
-    """Временный хэндлер для получения file_id анимаций (GIF)."""
-    await message.answer(f"Анимация (GIF) file_id:\n<code>{message.animation.file_id}</code>", parse_mode="HTML")
-
-@router.message(F.video)
-async def get_media_file_id_video(message: Message):
-    """Временный хэндлер для получения file_id видео."""
-    await message.answer(f"Видео file_id:\n<code>{message.video.file_id}</code>", parse_mode="HTML")
-
-@router.message(F.photo)
-async def get_media_file_id_photo(message: Message):
-    """Временный хэндлер для получения file_id фото."""
-    await message.answer(f"Фото file_id:\n<code>{message.photo[-1].file_id}</code>", parse_mode="HTML")
-
-@router.message(F.document)
-async def get_media_file_id_document(message: Message):
-    """Временный хэндлер для получения file_id документа."""
-    await message.answer(f"Документ file_id:\n<code>{message.document.file_id}</code>", parse_mode="HTML")
-
 async def edit_message_content(
     message_or_callback: Message | CallbackQuery,
     text: str = None,
@@ -194,9 +173,9 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot):
     )
 
     try:
-        # Пытаемся отправить анимацию (GIF)
+        # Пытаемся отправить анимацию (GIF) - обновлен file_id!
         await message.answer_animation(
-            animation="CgACAgIAAxkBAAIDzmn80OqDqFSqoMrvazZb58eJv1ghAAKZnAACaxDgSbryUa02EE8hQgQ",
+            animation="CgACAgIAAxkBAAIKvWm-5XOyiFR1PtV-Eg1hVPlkZHY-AAJSnwACcLPwSU27XjIjJrFMOgQ",
             caption=welcome_text,
             reply_markup=get_main_menu_keyboard(show_trial=show_trial),
             parse_mode="HTML"

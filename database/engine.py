@@ -1,12 +1,11 @@
 """
 Модуль подключения к базе данных.
-Асинхронный движок SQLAlchemy для SQLite (локальная база).
+Асинхронный движок SQLAlchemy.
 """
-import os
-from pathlib import Path
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker, AsyncEngine
 from sqlalchemy.orm import DeclarativeBase
 from typing import Optional
+from config import settings
 
 class Base(DeclarativeBase):
     """Базовый класс для всех моделей."""
@@ -16,19 +15,14 @@ class Base(DeclarativeBase):
 engine: Optional[AsyncEngine] = None
 _session_factory: Optional[async_sessionmaker] = None
 
-# Жестко задаем абсолютный путь к файлу БД в корне проекта (рядом с bot.py)
-BASE_DIR = Path(__file__).parent.parent
-DB_PATH = BASE_DIR / "vpn_bot.db"
-SQLITE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
-
 def get_engine() -> AsyncEngine:
     """Получить или создать асинхронный движок."""
     global engine
     if engine is None:
-        # Игнорируем .env и используем наш железобетонный локальный путь
+        # Используем PostgreSQL из файла конфигурации (.env)
         engine = create_async_engine(
-            SQLITE_URL,
-            echo=True, # Включаем вывод SQL-запросов в терминал для отладки
+            settings.DATABASE_URL,
+            echo=False,  # Отключаем спам SQL-запросов в логи
         )
     return engine
 
