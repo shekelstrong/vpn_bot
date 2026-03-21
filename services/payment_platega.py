@@ -10,26 +10,6 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Ссылки для возврата после оплаты
-# После оплаты пользователь возвращается на HTML страницу с сообщением об успехе
-# order_id будет добавлен при создании платежа
-def get_return_urls():
-    """Получить URL для возврата после оплаты."""
-    base_url = settings.BASE_URL
-    # Добавляем протокол если нет
-    if not base_url.startswith("http://") and not base_url.startswith("https://"):
-        base_url = f"https://{base_url}"
-    
-    return {
-        "return": f"{base_url}/pay_success",
-        "failed": f"{base_url}/pay_failed"
-    }
-
-RETURN_URLS = get_return_urls()
-RETURN_URL = RETURN_URLS["return"]
-FAILED_URL = RETURN_URLS["failed"]
-
-
 async def create_invoice(amount_rub: int, order_id: str, user_id: int, description: str = ""):
     """
     Создает платеж в Platega.io
@@ -62,10 +42,7 @@ async def create_invoice(amount_rub: int, order_id: str, user_id: int, descripti
         "User-Agent": "Python/3.11 aiohttp/3.10"
     }
 
-    # Формируем payload
-    # Важно: order_id передаем и в payload (для вебхука), и в return URL (для возврата)
-    return_url_with_order = f"{RETURN_URL}?order_id={order_id}"
-
+    # Формируем payload. Жестко прописываем редирект в телеграм-бот
     payload_data = {
         "paymentMethod": 2,  # Оплата картой
         "paymentDetails": {
@@ -73,8 +50,8 @@ async def create_invoice(amount_rub: int, order_id: str, user_id: int, descripti
             "currency": "RUB"
         },
         "description": description if description else f"Order #{order_id}",
-        "return": return_url_with_order,
-        "failedUrl": FAILED_URL,
+        "return": "https://t.me/nemo_vpn_bot",
+        "failedUrl": "https://t.me/nemo_vpn_bot",
         "payload": str(order_id)  # В payload передаем order_id для идентификации в вебхуке
     }
 

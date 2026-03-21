@@ -28,8 +28,7 @@ from services.payment_platega import platega_service
 from services.payment_crypto import check_webhook_signature
 from handlers.admin.notifications import (
     notify_admin_payment,
-    notify_referrer_payment,
-    notify_user_purchase
+    notify_referrer_payment
 )
 
 # Настройка логгирования
@@ -72,8 +71,6 @@ def validate_webhook_signature(body_text: str, signature: str, token: Optional[s
 
         if not is_valid:
             logger.warning("Неверная подпись webhook CryptoBot")
-            logger.warning(f"Ожидается: {calculated_signature[:20]}...")
-            logger.warning(f"Получено: {signature[:20]}...")
 
         return is_valid
     except Exception as e:
@@ -88,17 +85,11 @@ class WebhookHandler:
 
     async def handle_pay_success(self, request: web.Request) -> web.Response:
         """Обработчик возврата пользователя после успешной оплаты."""
-        order_id = request.query.get('order_id')
-        if order_id:
-            redirect_url = f"https://t.me/nemo_vpn_bot?start=pay_success_{order_id}"
-        else:
-            redirect_url = "https://t.me/nemo_vpn_bot"
-        raise web.HTTPSeeOther(redirect_url)
+        raise web.HTTPSeeOther("https://t.me/nemo_vpn_bot")
 
     async def handle_pay_failed(self, request: web.Request) -> web.Response:
         """Обработчик возврата пользователя после неудачной оплаты."""
-        redirect_url = "https://t.me/nemo_vpn_bot?start=pay_failed"
-        raise web.HTTPSeeOther(redirect_url)
+        raise web.HTTPSeeOther("https://t.me/nemo_vpn_bot")
 
     async def handle_crypto_webhook(self, request: web.Request) -> web.Response:
         """Обработка вебхука от CryptoBot."""
@@ -326,14 +317,23 @@ class WebhookHandler:
                 logger.info(f"Payment processed and bonuses distributed for user {tg_user_id}")
 
                 # 7. Финальные уведомления (Юзеру и Админу)
-                await notify_user_purchase(
-                    bot=bot,
-                    user_id=tg_user_id,
-                    amount_rub=amount,
-                    duration_days=days,
-                    is_extension=marzban_account_exists,
-                    marzban_username=user.marzban_username
-                )
+                try:
+                    subscription_info = ""
+                    if user.marzban_username:
+                        subscription_info = f"\n\n🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
+
+                    await bot.send_message(
+                        tg_user_id,
+                        f"✅ <b>Оплата прошла успешно!</b>\n\n"
+                        f"💎 Подписка: <b>{days} дней</b>\n"
+                        f"💰 Сумма: <b>{amount:.2f} {currency}</b>\n"
+                        f"{subscription_info}\n"
+                        f"Спасибо за покупку! 🎉",
+                        parse_mode="HTML"
+                    )
+                    logger.info(f"Уведомление об успешной покупке доставлено пользователю {tg_user_id}")
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить сообщение об успехе пользователю {tg_user_id}: {e}")
 
                 await notify_admin_payment(
                     bot=bot,
@@ -376,7 +376,7 @@ async def run_webhooks():
     await site.start()
 
     logger.info("=" * 50)
-    logger.info("Вебхук-сервер Nemo VPN запущен (Порт 8080) (SQLite)!")
+    logger.info("Вебхук-сервер Nemo VPN запущен (Порт 8080) (SQLite/PG)!")
     logger.info("Webhooks:")
     logger.info("  - https://dealflow.bond/cryptopay (CryptoBot)")
     logger.info("  - https://dealflow.bond/webhook/platega (Platega)")
