@@ -16,13 +16,14 @@ from loguru import logger
 from database.db import db
 from database.session import async_session_maker
 from services.platega_webhook import handle_platega_webhook_update
-from config import WEB_PORT
+from config import settings
 
 
 class WebhookServer:
+
     def __init__(self, host: str = "0.0.0.0", port: int = None):
         self.host = host
-        self.port = port if port is not None else WEB_PORT
+        self.port = port if port is not None else settings.WEB_PORT
         self.app = web.Application()
         self.bot = None
 
@@ -103,20 +104,19 @@ class WebhookServer:
         self.bot = bot
         runner = web.AppRunner(self.app)
         await runner.setup()
-
-        from config import BASE_URL
-
+        
         site = web.TCPSite(runner, self.host, self.port)
         await site.start()
         protocol = "http"
         logger.info(f"🌐 Webhook server started on http://{self.host}:{self.port}")
 
-        if BASE_URL.startswith("http://") or BASE_URL.startswith("https://"):
-            webhook_url = f"{BASE_URL}/webhook/platega"
+        if settings.BASE_URL.startswith("http://") or settings.BASE_URL.startswith("https://"):
+            webhook_url = f"{settings.BASE_URL}/webhook/platega"
         else:
-            webhook_url = f"{protocol}://{BASE_URL}/webhook/platega"
-        logger.info(f"   🔗 Platega webhook URL: {webhook_url}")
-        logger.info(f"   Health check: GET /health")
+            webhook_url = f"{protocol}://{settings.BASE_URL}/webhook/platega"
+            
+        logger.info(f"  🔗 Platega webhook URL: {webhook_url}")
+        logger.info(f"  Health check: GET /health")
 
         return runner
 

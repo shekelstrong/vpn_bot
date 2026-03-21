@@ -6,15 +6,15 @@
 import aiohttp
 import logging
 import json
-from config import PLATEGA_MERCHANT_ID, PLATEGA_API_KEY, PLATEGA_BASE_URL, BASE_URL, WEB_PORT
+from config import settings
 
 logger = logging.getLogger(__name__)
 
 # Ссылки для возврата после оплаты
 # После оплаты пользователь возвращается в бота с параметром для обработки
 # order_id будет добавлен при создании платежа
-RETURN_URL = f"{BASE_URL}/pay_success"
-FAILED_URL = f"{BASE_URL}/pay_failed"
+RETURN_URL = f"{settings.BASE_URL}/pay_success"
+FAILED_URL = f"{settings.BASE_URL}/pay_failed"
 
 
 async def create_invoice(amount_rub: int, order_id: str, user_id: int, description: str = ""):
@@ -30,11 +30,12 @@ async def create_invoice(amount_rub: int, order_id: str, user_id: int, descripti
     Returns:
         str: Ссылка на оплату или None при ошибке
     """
-    if not PLATEGA_MERCHANT_ID:
+
+    if not settings.PLATEGA_MERCHANT_ID:
         logger.error("❌ PLATEGA_MERCHANT_ID is missing in config.py!")
         return None
 
-    if not PLATEGA_API_KEY:
+    if not settings.PLATEGA_API_KEY:
         logger.error("❌ PLATEGA_API_KEY is missing in config.py!")
         return None
 
@@ -42,8 +43,8 @@ async def create_invoice(amount_rub: int, order_id: str, user_id: int, descripti
     url = "https://app.platega.io/transaction/process"
 
     headers = {
-        "X-MerchantId": PLATEGA_MERCHANT_ID,
-        "X-Secret": PLATEGA_API_KEY,
+        "X-MerchantId": settings.PLATEGA_MERCHANT_ID,
+        "X-Secret": settings.PLATEGA_API_KEY,
         "Content-Type": "application/json",
         "User-Agent": "Python/3.11 aiohttp/3.10"
     }
@@ -103,9 +104,9 @@ class PlategaService:
     """
 
     def __init__(self):
-        self.merchant_id = PLATEGA_MERCHANT_ID
-        self.api_key = PLATEGA_API_KEY
-        self.base_url = PLATEGA_BASE_URL
+        self.merchant_id = settings.PLATEGA_MERCHANT_ID
+        self.api_key = settings.PLATEGA_API_KEY
+        self.base_url = settings.PLATEGA_BASE_URL
 
     def create_payment_url(
         self,
@@ -119,7 +120,7 @@ class PlategaService:
     ) -> str:
         """
         Создать URL для оплаты (совместимость со старым кодом).
-        
+
         Для нового кода используйте async-функцию create_invoice.
         """
         logger.warning("⚠️ Используйте async-функцию create_invoice вместо create_payment_url")
