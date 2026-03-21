@@ -30,7 +30,12 @@ class Settings(BaseSettings):
     USDT_TO_RUB_RATE: float = Field(default=90.0, description="Курс USDT к RUB")
 
     # Platega
+    PLATEGA_MERCHANT_ID: str = Field(..., description="Merchant ID Platega")
+    PLATEGA_API_KEY: str = Field(..., description="API ключ Platega")
     PLATEGA_SECRET_KEY: str = Field(..., description="Секретный ключ Platega для вебхуков")
+    PLATEGA_BASE_URL: str = Field(default="https://app.platega.io", description="Базовый URL Platega API")
+    WEB_PORT: int = Field(default=8080, description="Порт для вебхук-сервера")
+    BASE_URL: str = Field(default="localhost", description="Базовый URL для вебхуков")
 
     # Referral system
     REFERRAL_PERCENTAGES: str = Field(default="15,10,5", description="Проценты реферальной системы (уровень 1,2,3)")

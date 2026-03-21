@@ -3,205 +3,127 @@
 Обработка вебхуков и создание платежей.
 """
 
-import hashlib
-import hmac
-from datetime import datetime
-from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field, validator
-from loguru import logger
+import aiohttp
+import logging
+import json
+from config import PLATEGA_MERCHANT_ID, PLATEGA_API_KEY, PLATEGA_BASE_URL, BASE_URL, WEB_PORT
 
-from config import settings
+logger = logging.getLogger(__name__)
+
+# Ссылки для возврата после оплаты
+# После оплаты пользователь возвращается в бота с параметром для обработки
+# order_id будет добавлен при создании платежа
+RETURN_URL = f"{BASE_URL}/pay_success"
+FAILED_URL = f"{BASE_URL}/pay_failed"
 
 
-class PlategaPaymentData(BaseModel):
+async def create_invoice(amount_rub: int, order_id: str, user_id: int, description: str = ""):
     """
-    Модель данных платежа Platega.
-    
-    Атрибуты:
-        order_id: ID заказа в вашей системе.
-        amount: Сумма платежа.
-        currency: Валюта платежа.
-        status: Статус платежа (success, failed, pending).
-        custom_id: Пользовательские данные (Telegram ID).
-        payment_id: ID платежа в Platega.
-        signature: Подпись для верификации.
-        created_at: Дата создания платежа.
+    Создает платеж в Platega.io
+
+    Args:
+        amount_rub: Сумма в рублях
+        order_id: ID заказа (уникальный, строка формата "tier_BASIC_12345")
+        user_id: ID пользователя Telegram
+        description: Описание платежа
+
+    Returns:
+        str: Ссылка на оплату или None при ошибке
     """
-    order_id: str
-    amount: float
-    currency: str
-    status: str
-    custom_id: Optional[str] = None
-    payment_id: Optional[str] = None
-    signature: str
-    created_at: Optional[datetime] = None
-    
-    @validator('status')
-    def validate_status(cls, v):
-        """Валидация статуса платежа."""
-        allowed_statuses = ['success', 'failed', 'pending', 'expired', 'cancelled']
-        if v.lower() not in allowed_statuses:
-            raise ValueError(f"Недопустимый статус: {v}")
-        return v.lower()
+    if not PLATEGA_MERCHANT_ID:
+        logger.error("❌ PLATEGA_MERCHANT_ID is missing in config.py!")
+        return None
+
+    if not PLATEGA_API_KEY:
+        logger.error("❌ PLATEGA_API_KEY is missing in config.py!")
+        return None
+
+    # Используем проверенный эндпоинт
+    url = "https://app.platega.io/transaction/process"
+
+    headers = {
+        "X-MerchantId": PLATEGA_MERCHANT_ID,
+        "X-Secret": PLATEGA_API_KEY,
+        "Content-Type": "application/json",
+        "User-Agent": "Python/3.11 aiohttp/3.10"
+    }
+
+    # Формируем payload
+    # Важно: order_id передаем и в payload (для вебхука), и в return URL (для возврата)
+    return_url_with_order = f"{RETURN_URL}?order_id={order_id}"
+
+    payload_data = {
+        "paymentMethod": 2,  # Оплата картой
+        "paymentDetails": {
+            "amount": int(amount_rub),
+            "currency": "RUB"
+        },
+        "description": description if description else f"Order #{order_id}",
+        "return": return_url_with_order,
+        "failedUrl": FAILED_URL,
+        "payload": str(order_id)  # В payload передаем order_id для идентификации в вебхуке
+    }
+
+    logger.info(f"📤 Platega Request: {payload_data}")
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(url, json=payload_data, headers=headers) as resp:
+                response_text = await resp.text()
+                logger.info(f"📥 Platega Response status: {resp.status}")
+
+                # Попытка 1: Пробуем распарсить JSON (штатный режим)
+                try:
+                    data = json.loads(response_text)
+                except:
+                    logger.warning(f"⚠️ Platega ответила не JSON-ом: {response_text}")
+                    data = {}
+
+                if resp.status in (200, 201):
+                    # Ищем ссылку
+                    link = data.get("redirect") or data.get("url") or data.get("payment_url")
+                    if link:
+                        logger.info(f"✅ Invoice created: {link}")
+                        return link
+                    else:
+                        logger.error(f"❌ Ссылка не найдена в ответе: {data}")
+                        return None
+                else:
+                    logger.error(f"❌ Platega Error ({resp.status}): {response_text}")
+                    return None
+
+        except Exception as e:
+            logger.error(f"❌ Platega Connection Error: {e}")
+            return None
 
 
 class PlategaService:
     """
     Сервис для работы с Platega.io.
-    
-    Методы:
-        verify_signature: Проверить подпись вебхука.
-        parse_webhook: Распарсить данные вебхука.
-        create_payment_url: Создать URL для оплаты.
     """
-    
+
     def __init__(self):
-        self.secret_key = settings.PLATEGA_SECRET_KEY
-        self.base_url = "https://api.platega.io"
-    
-    def verify_signature(self, payload: Dict[str, Any], signature: str) -> bool:
-        """
-        Проверить подпись вебхука.
-        
-        Args:
-            payload: Данные вебхука.
-            signature: Подпись из заголовка.
-            
-        Returns:
-            bool: True если подпись верна.
-        """
-        # Сортируем ключи и создаем строку для подписи
-        sorted_data = sorted(payload.items())
-        data_string = "&".join(f"{k}={v}" for k, v in sorted_data if k != 'signature')
-        
-        # Создаем HMAC-SHA256 подпись
-        expected_signature = hmac.new(
-            self.secret_key.encode('utf-8'),
-            data_string.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        
-        # Сравниваем подписи
-        is_valid = hmac.compare_digest(expected_signature, signature)
-        
-        if not is_valid:
-            logger.warning(f"Неверная подпись Platega. Ожидалось: {expected_signature}, Получено: {signature}")
-        
-        return is_valid
-    
-    def parse_webhook(self, payload: Dict[str, Any], signature: str) -> Optional[PlategaPaymentData]:
-        """
-        Распарсить и проверить данные вебхука.
-        
-        Args:
-            payload: Данные вебхука.
-            signature: Подпись из заголовка.
-            
-        Returns:
-            PlategaPaymentData: Проверенные данные платежа или None.
-        """
-        # Проверяем подпись
-        if not self.verify_signature(payload, signature):
-            logger.error("Неверная подпись вебхука Platega")
-            return None
-        
-        try:
-            # Создаем модель данных
-            payment_data = PlategaPaymentData(**payload)
-            logger.info(f"Получен вебхук Platega: заказ {payment_data.order_id}, статус {payment_data.status}")
-            return payment_data
-            
-        except Exception as e:
-            logger.error(f"Ошибка парсинга вебхука Platega: {e}")
-            return None
-    
+        self.merchant_id = PLATEGA_MERCHANT_ID
+        self.api_key = PLATEGA_API_KEY
+        self.base_url = PLATEGA_BASE_URL
+
     def create_payment_url(
         self,
         order_id: str,
         amount: float,
         currency: str = "RUB",
-        custom_id: Optional[str] = None,
-        description: Optional[str] = None,
-        success_url: Optional[str] = None,
-        fail_url: Optional[str] = None
+        custom_id: str = None,
+        description: str = None,
+        success_url: str = None,
+        fail_url: str = None
     ) -> str:
         """
-        Создать URL для оплаты.
+        Создать URL для оплаты (совместимость со старым кодом).
         
-        Args:
-            order_id: ID заказа в вашей системе.
-            amount: Сумма платежа.
-            currency: Валюта платежа.
-            custom_id: Пользовательские данные (Telegram ID).
-            description: Описание платежа.
-            success_url: URL для перенаправления после успешной оплаты.
-            fail_url: URL для перенаправления после неудачной оплаты.
-            
-        Returns:
-            str: URL для оплаты.
+        Для нового кода используйте async-функцию create_invoice.
         """
-        # В реальном сценарии здесь должен быть запрос к API Platega
-        # для создания платежа и получения URL
-        
-        # Формируем параметры
-        params = {
-            "order_id": order_id,
-            "amount": str(amount),
-            "currency": currency,
-        }
-        
-        if custom_id:
-            params["custom_id"] = custom_id
-        
-        if description:
-            params["description"] = description
-        
-        if success_url:
-            params["success_url"] = success_url
-        
-        if fail_url:
-            params["fail_url"] = fail_url
-        
-        # Создаем подпись
-        sorted_data = sorted(params.items())
-        data_string = "&".join(f"{k}={v}" for k, v in sorted_data)
-        signature = hmac.new(
-            self.secret_key.encode('utf-8'),
-            data_string.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        
-        params["signature"] = signature
-        
-        # Формируем URL
-        # В реальности URL нужно получать из API ответа
-        query_string = "&".join(f"{k}={v}" for k, v in params.items())
-        payment_url = f"{self.base_url}/pay?{query_string}"
-        
-        logger.info(f"Создан платеж Platega: {order_id} на сумму {amount} {currency}")
-        
-        return payment_url
-    
-    def create_signature(self, data: Dict[str, Any]) -> str:
-        """
-        Создать подпись для запроса к API Platega.
-        
-        Args:
-            data: Данные запроса.
-            
-        Returns:
-            str: HMAC-SHA256 подпись.
-        """
-        sorted_data = sorted(data.items())
-        data_string = "&".join(f"{k}={v}" for k, v in sorted_data)
-        
-        signature = hmac.new(
-            self.secret_key.encode('utf-8'),
-            data_string.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        
-        return signature
+        logger.warning("⚠️ Используйте async-функцию create_invoice вместо create_payment_url")
+        return f"https://app.platega.io/pay?order_id={order_id}"
 
 
 # Глобальный экземпляр сервиса

@@ -317,7 +317,7 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
 async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     """Оплата банковской картой через Platega."""
     user_id = callback.from_user.id
-    
+
     data = await state.get_data()
     price = data.get("price", settings.SUBSCRIPTION_PRICE_RUB)
     days = data.get("days", settings.SUBSCRIPTION_EXPIRE_DAYS)
@@ -328,14 +328,16 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
         import uuid
         order_id = f"platega_{user_id}_{uuid.uuid4().hex[:8]}"
 
-        from services.payment_platega import platega_service
-        payment_url = platega_service.create_payment_url(
+        from services.payment_platega import create_invoice
+        payment_url = await create_invoice(
+            amount_rub=int(price),
             order_id=order_id,
-            amount=price,
-            currency="RUB",
-            custom_id=str(user_id),
+            user_id=user_id,
             description=f"Nemo VPN подписка на {days} дней"
         )
+
+        if not payment_url:
+            raise Exception("Не удалось создать счет в Platega")
 
         payment_invoice = PaymentInvoice(
             user_id=user_id,
@@ -344,9 +346,11 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
             currency="RUB",
             payment_method="platega",
             status="pending",
+            payload=f'{{"days": {days}}}',
             expires_at=datetime.utcnow() + timedelta(hours=1)
         )
         session.add(payment_invoice)
+        await session.commit()
 
         text = (
             "💳 <b>Счет на оплату (Банковская карта)</b>\n\n"

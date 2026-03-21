@@ -51,6 +51,9 @@ from handlers.referrals import router as referrals_router
 from services.crypto_bot_v2 import crypto_bot_v2_service
 from services.crypto_webhook import handle_crypto_webhook_update
 
+# Импортируем вебхук-сервер для Platega
+from utils.webhook_server import webhook_server
+
 
 
 async def update_trial_command_for_user(user_id: int, has_active_subscription: bool):
@@ -240,21 +243,29 @@ async def on_startup():
     await update_trial_commands_for_all_users()
     logger.info("Команды /trial обновлены для всех пользователей")
 
+    # Запускаем вебхук-сервер для Platega
+    await webhook_server.start(bot)
+    logger.info("Вебхук-сервер запущен")
+
 
 async def on_shutdown():
     """Действия при остановке бота."""
     logger.info("Остановка бота...")
-    
+
     # Остановка планировщика
     scheduler = get_scheduler()
     if scheduler:
         await scheduler.stop()
         logger.info("Планировщик остановлен")
-    
+
+    # Остановка вебхук-сервера
+    # Note: runner сохраняется в webhook_server как свойство, но мы используем глобальный экземпляр
+    # Остановка выполняется через asyncio.create_task
+
     # Закрытие соединений
     await marzban_service.close()
     logger.info("Marzban API клиент закрыт")
-    
+
     await close_db()
     await bot.session.close()
     logger.info("Сессия БД закрыта")
@@ -266,7 +277,7 @@ async def main():
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(sig, lambda: asyncio.create_task(on_shutdown()))
-    
+
     # Запускаем бота
     try:
         await on_startup()
@@ -275,6 +286,8 @@ async def main():
         pass
     finally:
         await on_shutdown()
+        # Остановка вебхук-сервера
+        await webhook_server.stop(getattr(webhook_server, 'runner', None))
 
 
 if __name__ == "__main__":

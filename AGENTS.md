@@ -10,8 +10,8 @@ pip install pytest pytest-asyncio ruff mypy
 ```
 
 ### Запуск
-- `python bot.py` - запуск бота
-- `python webhooks.py` - запуск вебхуков (отдельный процесс, порт 8080)
+- `python bot.py` - запуск бота с вебхук-сервером (встроенный, порт из WEB_PORT)
+- Вебхук-сервер запускается автоматически вместе с ботом и обрабатывает платежи от CryptoBot и Platega
 
 ### Тестирование
 - `pytest tests/` - все тесты
@@ -168,6 +168,13 @@ if not os.environ.get('PYTHONHTTPSVERIFY', '') and getattr(ssl, '_create_unverif
 - **Триал**: 24 часа, 1 GB трафика, один на пользователя
 - **Подписка**: 100₽/месяц, протокол VLESS Reality
 - **Вывод средств**: минимальная сумма 1000₽
+- **Платежные системы**: CryptoBot (USDT), Platega (банковские карты)
+
+### Платежная система Platega
+- **Webhook URL**: формируется как `https://ВАШ_ДОМЕН/webhook/platega`
+- **Вебхук-сервер**: запускается автоматически в `bot.py` через `webhook_server.start(bot)`
+- **Обработка вебхуков**: файл `services/platega_webhook.py` функция `handle_platega_webhook_update`
+- **URL для возврата**: `/pay_success` и `/pay_failed` для перенаправления пользователя в бота после оплаты
 
 ---
 
