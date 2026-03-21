@@ -176,8 +176,8 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 marzban_user = await marzban_service.get_user(user.marzban_username)
                 if marzban_user:
                     await marzban_service.update_user_expiry(
-                        marzban_username=user.marzban_username,
-                        extra_days=days
+                        user.marzban_username,
+                        days
                     )
                     logger.info(f"✅ Marzban: подписка {user.marzban_username} продлена на {days} дней")
                 else:
