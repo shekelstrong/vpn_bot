@@ -28,5 +28,10 @@ jobs:
             mkdir -p logs
             chmod 777 logs
 
-            # Пересобираем и перезапускаем контейнеры (с удалением конфликтующих)
-            docker compose up -d --build --remove-orphans
+            # Полная остановка и пересборка без кэша
+            docker compose down
+            docker compose build --no-cache
+            docker compose up -d --remove-orphans
+            
+            # Очистка старых образов для экономии места
+            docker image prune -f
