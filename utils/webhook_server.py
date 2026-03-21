@@ -1,6 +1,7 @@
 """
 HTTP сервер для обработки вебхуков от Platega.
 Запускается вместе с ботом в основном процессе.
+Работает по аналогии с успешными проектами.
 """
 
 import asyncio
@@ -28,7 +29,7 @@ class WebhookServer:
         # Регистрируем роуты
         self.app.router.add_post('/webhook/platega', self.handle_platega_webhook)
         self.app.router.add_get('/health', self.handle_health)
-        # Роуты для возврата пользователя после оплаты
+        # Роуты для возврата пользователя после оплаты - ТЕПЕРЬ ПРОСТО HTML СТРАНИЦЫ
         self.app.router.add_get('/pay_success', self.handle_pay_success)
         self.app.router.add_get('/pay_failed', self.handle_pay_failed)
 
@@ -242,7 +243,7 @@ class WebhookServer:
         self.bot = bot
         runner = web.AppRunner(self.app)
         await runner.setup()
-        
+
         site = web.TCPSite(runner, self.host, self.port)
         await site.start()
         protocol = "http"
@@ -252,7 +253,7 @@ class WebhookServer:
             webhook_url = f"{settings.BASE_URL}/webhook/platega"
         else:
             webhook_url = f"{protocol}://{settings.BASE_URL}/webhook/platega"
-            
+
         logger.info(f"  🔗 Platega webhook URL: {webhook_url}")
         logger.info(f"  Health check: GET /health")
 

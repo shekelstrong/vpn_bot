@@ -11,10 +11,23 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 # Ссылки для возврата после оплаты
-# После оплаты пользователь возвращается в бота с параметром для обработки
+# После оплаты пользователь возвращается на HTML страницу с сообщением об успехе
 # order_id будет добавлен при создании платежа
-RETURN_URL = f"{settings.BASE_URL}/pay_success"
-FAILED_URL = f"{settings.BASE_URL}/pay_failed"
+def get_return_urls():
+    """Получить URL для возврата после оплаты."""
+    base_url = settings.BASE_URL
+    # Добавляем протокол если нет
+    if not base_url.startswith("http://") and not base_url.startswith("https://"):
+        base_url = f"https://{base_url}"
+    
+    return {
+        "return": f"{base_url}/pay_success",
+        "failed": f"{base_url}/pay_failed"
+    }
+
+RETURN_URLS = get_return_urls()
+RETURN_URL = RETURN_URLS["return"]
+FAILED_URL = RETURN_URLS["failed"]
 
 
 async def create_invoice(amount_rub: int, order_id: str, user_id: int, description: str = ""):
