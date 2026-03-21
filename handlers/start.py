@@ -9,11 +9,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 import uuid
 from datetime import datetime
-from database.models import User
+from database.models import User, PaymentInvoice
 from keyboards.inline import get_main_menu_keyboard
 from handlers.admin.notifications import notify_admin_new_user, notify_referrer_new_referral
 
 router = Router(name="start_router")
+
+# ВРЕМЕННЫЙ ХЭНДЛЕР ДЛЯ ПОЛУЧЕНИЯ FILE_ID (УДАЛИТЬ ПОСЛЕ НАСТРОЙКИ)
+@router.message(F.animation | F.video | F.photo | F.document)
+async def get_media_file_id(message: Message):
+    """Временный хэндлер для получения file_id медиафайлов."""
+    if message.animation:
+        await message.answer(f"Анимация (GIF) file_id:\n`{message.animation.file_id}`", parse_mode="Markdown")
+    elif message.video:
+        await message.answer(f"Видео file_id:\n`{message.video.file_id}`", parse_mode="Markdown")
+    elif message.photo:
+        await message.answer(f"Фото file_id:\n`{message.photo[-1].file_id}`", parse_mode="Markdown")
+    elif message.document:
+        await message.answer(f"Документ file_id:\n`{message.document.file_id}`", parse_mode="Markdown")
 
 async def edit_message_content(
     message_or_callback: Message | CallbackQuery,
@@ -58,15 +71,36 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot):
     """
     user_id = message.from_user.id
     username = message.from_user.username
-
-    # Пытаемся получить аргумент команды (например, ID рефовода из ссылки /start 12345)
+    
     command_args = message.text.split()[1] if len(message.text.split()) > 1 else None
     referrer_id = None
 
-    if command_args and command_args.isdigit():
-        ref_id_candidate = int(command_args)
-        if ref_id_candidate != user_id:  # Защита от регистрации по своей же ссылке
-            referrer_id = ref_id_candidate
+    if command_args:
+        # ОБРАБОТКА ВОЗВРАТА ПОСЛЕ ОПЛАТЫ
+        if command_args.startswith("pay_success_"):
+            invoice_id = command_args.replace("pay_success_", "")
+            
+            # Попытка обработать ручной платеж безопасно (без краша при циклическом импорте)
+            try:
+                from handlers.buy import process_manual_payment
+                inv_res = await session.execute(select(PaymentInvoice).where(PaymentInvoice.invoice_id == invoice_id))
+                inv = inv_res.scalar_one_or_none()
+                if inv and inv.status == "pending" and inv.payment_method == "cryptobot":
+                    await process_manual_payment(bot, session, inv)
+            except ImportError:
+                logger.warning("Не удалось импортировать process_manual_payment. Пропускаем ручную проверку.")
+            except Exception as e:
+                logger.error(f"Ошибка ручной проверки платежа в /start: {e}")
+
+            await message.answer("🔄 Возврат с кассы. Если оплата прошла успешно, подписка обновится автоматически в течение пары минут.", parse_mode="HTML")
+        
+        elif command_args == "pay_failed":
+            await message.answer("❌ Оплата не удалась или была отменена.", parse_mode="HTML")
+        
+        elif command_args.isdigit():
+            ref_id_candidate = int(command_args)
+            if ref_id_candidate != user_id:  # Защита от регистрации по своей же ссылке
+                referrer_id = ref_id_candidate
 
     # Проверяем, существует ли пользователь в базе
     result = await session.execute(select(User).where(User.user_id == user_id))
@@ -173,6 +207,7 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot):
     )
 
     try:
+        # Пытаемся отправить анимацию (GIF)
         await message.answer_animation(
             animation="CgACAgIAAxkBAAIDzmn80OqDqFSqoMrvazZb58eJv1ghAAKZnAACaxDgSbryUa02EE8hQgQ",
             caption=welcome_text,
@@ -181,7 +216,7 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot):
         )
     except Exception as e:
         logger.error(f"Ошибка при отправке анимации: {e}")
-        # Фолбек на текстовое сообщение, если GIF не удалось отправить
+        # Фолбек на текстовое сообщение, если GIF не удалось отправить (например, неверный file_id)
         await message.answer(
             text=welcome_text,
             reply_markup=get_main_menu_keyboard(show_trial=show_trial),
