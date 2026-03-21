@@ -35,7 +35,7 @@ SUBSCRIPTION_PERIODS = {
     "12month": {"days": 365, "months": 12},
 }
 
-async def _process_manual_payment(bot, session: AsyncSession, payment_invoice: PaymentInvoice):
+async def process_manual_payment(bot, session: AsyncSession, payment_invoice: PaymentInvoice):
     """Ручная обработка выдачи подписки, если вебхук потерялся по пути к серверу."""
     try:
         days = 30

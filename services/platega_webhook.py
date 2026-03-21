@@ -211,8 +211,8 @@ async def issue_subscription(
                 marzban_user = await marzban_service.get_user(user.marzban_username)
                 if marzban_user:
                     await marzban_service.update_user_expiry(
-                        username=user.marzban_username,
-                        days=days
+                        marzban_username=user.marzban_username,
+                        extra_days=days
                     )
                     logger.info(f"Подписка пользователя {user.marzban_username} продлена на {days} дней")
                 else:

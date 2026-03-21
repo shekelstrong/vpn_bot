@@ -35,6 +35,9 @@ vpn_bot/
 ├── config.py               # Pydantic settings + DB settings helpers
 ├── requirements.txt        # Python dependencies
 ├── docker-compose.yml      # Docker services (bot, webhooks, db, redis)
+├── Dockerfile              # Docker image configuration
+├── nginx.conf              # Nginx reverse proxy config
+├── .env                    # Environment variables (DO NOT COMMIT)
 ├── database/
 │   ├── models.py           # SQLAlchemy models (User, Transaction, etc.)
 │   └── engine.py           # Async engine + session factory
@@ -49,16 +52,20 @@ vpn_bot/
 │   │   ├── notifications.py# Admin/user notifications
 │   │   └── settings.py     # Bot settings management
 │   └── referrals.py        # Referral program
-├── services/
-│   ├── marzban_api.py      # Marzban API client
-│   ├── payment_crypto.py   # CryptoBot integration
-│   └── payment_platega.py  # Platega integration
 ├── keyboards/
 │   ├── inline.py           # Inline keyboards
 │   └── reply.py            # Reply keyboards
+├── services/
+│   ├── marzban_api.py      # Marzban API client
+│   ├── payment_crypto.py   # CryptoBot integration
+│   ├── payment_platega.py  # Platega integration
+│   ├── crypto_bot_v2.py    # CryptoBot v2 service
+│   ├── crypto_webhook.py   # CryptoBot webhook handler
+│   └── platega_webhook.py  # Platega webhook handler
 ├── utils/
 │   ├── scheduler.py        # Notification scheduler (APScheduler)
-│   └── states.py           # FSM states
+│   ├── states.py           # FSM states
+│   └── webhook_server.py   # Webhook server for payments
 └── logs/                   # Log files (rotated daily)
 ```
 
@@ -104,10 +111,13 @@ MARZBAN_ADMIN_PASSWORD=password
 
 # Database
 DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/vpn_bot
+POSTGRES_PASSWORD=secure_password
 
 # Payments
 CRYPTO_BOT_TOKEN=cryptobot_token
-PLATEGA_SECRET_KEY=platega_secret_key
+PLATEGA_MERCHANT_ID=merchant_id
+PLATEGA_API_KEY=api_key
+PLATEGA_SECRET_KEY=secret_key
 
 # VLESS Reality
 VLESS_PORT=8444
@@ -123,33 +133,54 @@ VLESS_FINGERPRINT=chrome
 - `settings.notification_intervals_list` - Minutes before expiry
 - `settings.marzban_api_url` - Full Marzban API URL
 
-## Key Commands
+## Building and Running
 
-### Development
+### Local Development
+
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Run bot (local)
+# Run bot (includes embedded webhook server)
 python bot.py
 
-# Run webhooks (separate process, port 8080)
+# Run webhooks separately (for production)
 python webhooks.py
-
-# Docker
-docker-compose up -d --build
-docker-compose logs -f bot
-docker-compose logs -f webhooks
 ```
 
-### Bot Commands
-- `/start` - Main menu
-- `/me` - User profile
-- `/buy` - Purchase subscription
-- `/trial` - Free trial
-- `/referral` - Referral program
-- `/help` - Help
-- `/admin` - Admin panel (admins only)
+### Docker Deployment
+
+```bash
+# Build and start all services
+docker-compose up -d --build
+
+# View logs
+docker-compose logs -f bot
+docker-compose logs -f webhooks
+
+# Restart services
+docker-compose restart bot
+
+# Stop all services
+docker-compose down
+```
+
+### Testing
+
+```bash
+# Install dev dependencies
+pip install pytest pytest-asyncio ruff mypy
+
+# Run tests
+pytest tests/
+
+# Lint code
+ruff check .
+ruff format .
+
+# Type checking
+mypy .
+```
 
 ## Architecture Patterns
 
@@ -176,7 +207,7 @@ class MarzbanService:
         # Retry logic (3 attempts)
 ```
 
-### Payment Processing Flow (webhooks.py)
+### Payment Processing Flow
 1. Receive webhook from CryptoBot/Platega
 2. Validate signature and payment status
 3. Extract user ID from custom_payload or PaymentInvoice
@@ -232,6 +263,78 @@ vless_link = (
 )
 ```
 
+## Key Commands
+
+### Bot Commands
+- `/start` - Main menu
+- `/me` - User profile
+- `/buy` - Purchase subscription
+- `/trial` - Free trial (only for users without active subscription)
+- `/referral` - Referral program
+- `/help` - Help
+- `/admin` - Admin panel (admins only)
+
+### Subscription Pricing
+| Period | Price | Discount |
+|--------|-------|----------|
+| 1 month | 100₽ | - |
+| 3 months | 270₽ | 10% |
+| 6 months | 500₽ | 17% |
+| 12 months | 900₽ | 25% |
+
+## Development Conventions
+
+### Coding Style
+- **Language**: Russian for all user-facing text, comments, docstrings
+- **Typing**: Full type hints for all functions
+- **Async**: All I/O operations are async
+- **Line length**: Maximum 120 characters
+
+### Import Order (strict)
+```python
+# 1. Standard libraries
+import os
+from datetime import datetime
+
+# 2. Third-party libraries (alphabetical)
+from aiogram import Router, F
+from loguru import logger
+from sqlalchemy import select
+
+# 3. Local modules (alphabetical)
+from config import settings
+from database.models import User
+```
+
+### Error Handling
+```python
+from httpx import HTTPStatusError
+
+try:
+    result = await marzban_service.create_user(tg_id)
+    logger.info(f"Пользователь {tg_id} создан успешно")
+except HTTPStatusError as e:
+    logger.error(f"Ошибка HTTP при создании пользователя {tg_id}: {e}")
+    raise Exception("Не удалось создать пользователя в Marzban")
+except Exception as e:
+    logger.critical(f"Неожиданная ошибка: {e}")
+    raise
+```
+
+### Documentation
+- Docstrings in Russian for all public functions
+- Format: `"""Краткое описание."""`
+- Logs in Russian via `logger.info()`, `logger.error()`, `logger.critical()`
+- Never log secrets (tokens, passwords, API keys)
+
+## Security Notes
+
+- Never commit `.env` file
+- Never log secrets (tokens, passwords, API keys)
+- Admin commands check `user_id in settings.admin_ids_list`
+- Webhook signatures validated for Platega
+- Payment IDs stored as unique constraints
+
 ## Common Operations
 
 ### Create User in Marzban
@@ -254,52 +357,62 @@ price = await calculate_tariff_price(session, base_price=100, months=3)
 # Returns 270 (10% discount for 3 months)
 ```
 
-### Send Admin Notification
+### Database Session Pattern
 ```python
-from handlers.admin.notifications import notify_admin_payment
+from sqlalchemy import select
+from database.engine import get_session_factory
 
-await notify_admin_payment(
-    bot=bot,
-    user_id=user_id,
-    amount_rub=100,
-    username="user123",
-    method="cryptobot",
-    referrers_bonuses=[{'level': 1, 'id': 123, 'bonus': 15}]
-)
+async def update_user_balance(user_id: int, amount: int):
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if user:
+            user.balance += amount
+            await session.commit()
+            await session.refresh(user)
 ```
 
-## Testing & Debugging
+## Troubleshooting
+
+### Common Issues
+
+1. **SSL errors on macOS**: SSL patch is already applied in bot.py (lines 12-16)
+
+2. **User not found in Marzban**: Service returns `None` for 404 (handled)
+
+3. **Payment not processed**: Check webhook logs and signature validation
+
+4. **Database connection failed**: 
+   - Local: Ensure `vpn_bot.db` exists in project root
+   - Docker: Check PostgreSQL container is running
+
+5. **Webhook not receiving payments**:
+   - Verify port 8080 is accessible
+   - Check nginx configuration for reverse proxy
+   - Validate webhook URLs in payment system dashboards
 
 ### Debug Commands
-- `/ping` - Bot health check
-- `/me` - Current user info
+```bash
+# Check container status
+docker-compose ps
 
-### Logs
+# View real-time logs
+docker-compose logs -f bot
+
+# Check database
+docker-compose exec db psql -U postgres -d vpn_bot -c "SELECT COUNT(*) FROM users;"
+
+# Restart specific service
+docker-compose restart bot
+```
+
+### Log Files
 - Location: `logs/bot_YYYY-MM-DD.log`, `logs/webhooks_YYYY-MM-DD.log`
 - Rotation: Daily at midnight
 - Retention: 7 days
-
-### Common Issues
-1. **SSL errors on macOS**: SSL patch is already applied in bot.py
-2. **User not found in Marzban**: Service returns `None` for 404 (handled)
-3. **Payment not processed**: Check webhook logs and signature validation
-
-## Coding Conventions
-
-- **Language**: Russian for all user-facing text, comments, docstrings
-- **Typing**: Full type hints for all functions
-- **Async**: All I/O operations are async
-- **Error Handling**: Try-except with logging for all external calls
-- **Logging**: loguru with levels (debug, info, warning, error, critical)
-- **Docstrings**: Russian, Google-style with Args/Returns
-
-## Security Notes
-
-- Never commit `.env` file
-- Never log secrets (tokens, passwords, API keys)
-- Admin commands check `user_id in settings.admin_ids_list`
-- Webhook signatures validated for Platega
-- Payment IDs stored as unique constraints
 
 ## Deployment Checklist
 
@@ -311,3 +424,13 @@ await notify_admin_payment(
    - CryptoBot: `https://your-server.com/webhook/crypto`
    - Platega: `https://your-server.com/webhook/platega`
 6. Test with `/ping` command
+7. Verify admin panel access
+8. Test payment flow end-to-end
+
+## Related Documentation
+
+- `README.md` - Main project documentation and quick start guide
+- `DEPLOYMENT.md` - Detailed deployment instructions
+- `WEBHOOKS_SETUP.md` - Webhook configuration guide
+- `CHANGELOG.md` - Version history and changes
+- `AGENTS.md` - Coding guidelines and conventions for AI agents
