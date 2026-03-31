@@ -145,11 +145,13 @@ class WebhookHandler:
 
                 tg_user_id = payment_invoice.user_id
                 days = 30
+                tier = "standard"  # НОВОЕ: По умолчанию обычный тариф
 
                 if payment_invoice.payload:
                     try:
                         payload = json.loads(payment_invoice.payload)
                         days = payload.get("days", 30)
+                        tier = payload.get("tier", "standard")  # Извлекаем тариф
                     except:
                         pass
 
@@ -159,7 +161,8 @@ class WebhookHandler:
                     currency=payment_invoice.currency,
                     payment_method='cryptobot',
                     payment_id=str(invoice_id),
-                    days=days
+                    days=days,
+                    tier=tier  # Передаем тариф в обработчик
                 )
 
                 return web.json_response({"status": "ok"})
@@ -216,7 +219,8 @@ class WebhookHandler:
         currency: str,
         payment_method: str,
         payment_id: str,
-        days: int = 30
+        days: int = 30,
+        tier: str = "standard"  # НОВОЕ: Добавлен параметр тарифа
     ):
         """Обработка успешного платежа и распределение реферальных бонусов."""
         from aiogram import Bot
@@ -239,7 +243,7 @@ class WebhookHandler:
                     .values(status="paid")
                 )
 
-                # 3. Создаем транзакцию
+                # 3. Создаем транзакцию с учетом тарифа
                 transaction = Transaction(
                     user_id=tg_user_id,
                     amount=amount,
@@ -247,7 +251,7 @@ class WebhookHandler:
                     payment_method=payment_method,
                     status="paid",
                     payment_id=payment_id,
-                    description=f"Оплата подписки на {days} дней",
+                    description=f"Оплата подписки на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'})",
                 )
                 session.add(transaction)
 
@@ -257,6 +261,9 @@ class WebhookHandler:
                     user.expire_date = user.expire_date + timedelta(days=days)
                 else:
                     user.expire_date = now + timedelta(days=days)
+
+                # НОВОЕ: Сохраняем тариф пользователю
+                user.tier = tier
 
                 # 5. РЕФЕРАЛЬНАЯ ЛОГИКА (3 уровня)
                 referrers_bonuses = []
@@ -303,18 +310,19 @@ class WebhookHandler:
                     except: pass
 
                 if marzban_account_exists:
-                    await marzban_service.update_user_expiry(user.marzban_username, days)
+                    await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier)
                 else:
                     new_acc = await marzban_service.create_user(
                         tg_id=tg_user_id,
                         username=user.username,
                         expire_days=days,
-                        data_limit_gb=0.0
+                        data_limit_gb=0.0,
+                        tier=tier
                     )
                     user.marzban_username = new_acc.get('username')
 
                 await session.commit()
-                logger.info(f"Payment processed and bonuses distributed for user {tg_user_id}")
+                logger.info(f"Payment processed and bonuses distributed for user {tg_user_id} (Тариф: {tier})")
 
                 # 7. Финальные уведомления (Юзеру и Админу)
                 try:
@@ -322,10 +330,13 @@ class WebhookHandler:
                     if user.marzban_username:
                         subscription_info = f"\n\n🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
 
+                    tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+
                     await bot.send_message(
                         tg_user_id,
                         f"✅ <b>Оплата прошла успешно!</b>\n\n"
-                        f"💎 Подписка: <b>{days} дней</b>\n"
+                        f"💎 Тариф: <b>{tier_name}</b>\n"
+                        f"⏳ Подписка: <b>{days} дней</b>\n"
                         f"💰 Сумма: <b>{amount:.2f} {currency}</b>\n"
                         f"{subscription_info}\n"
                         f"Спасибо за покупку! 🎉",

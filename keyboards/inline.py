@@ -10,15 +10,6 @@ from typing import Optional, List
 def get_main_menu_keyboard(show_trial: bool = True) -> InlineKeyboardMarkup:
     """
     Главное меню бота.
-
-    Кнопки:
-        Row 1: Мой профиль 👤 | Реферальная программа 👥
-        Row 2: Подписка 📦 | Купить подписку 🛒
-        Row 3: Помощь 🆘 (red, по центру)
-        Row 4: Пробная подписка 🎁 (green, только если show_trial=True)
-
-    Args:
-        show_trial: Показывать ли кнопку пробной подписки
     """
     builder = InlineKeyboardBuilder()
 
@@ -49,10 +40,6 @@ def get_profile_keyboard(
 ) -> InlineKeyboardMarkup:
     """
     Клавиатура профиля пользователя.
-    
-    Args:
-        has_subscription: Есть ли активная подписка.
-        show_link: Показать кнопку получения ссылки.
     """
     builder = InlineKeyboardBuilder()
     
@@ -73,12 +60,6 @@ def get_profile_keyboard(
 def get_buy_keyboard() -> InlineKeyboardMarkup:
     """
     Клавиатура выбора способа оплаты.
-    
-    Кнопки:
-        - CryptoBot (USDT) 💰
-        - Банковская карта 🏦
-        - Реферальная программа 👥
-        - Назад ↩️
     """
     builder = InlineKeyboardBuilder()
     
@@ -94,10 +75,6 @@ def get_buy_keyboard() -> InlineKeyboardMarkup:
 def get_payment_keyboard(invoice_url: str, invoice_id: str) -> InlineKeyboardMarkup:
     """
     Клавиатура для оплаты счета.
-    
-    Args:
-        invoice_url: URL для оплаты.
-        invoice_id: ID счета для проверки.
     """
     builder = InlineKeyboardBuilder()
     
@@ -125,7 +102,7 @@ def get_trial_keyboard() -> InlineKeyboardMarkup:
 
 def get_help_keyboard() -> InlineKeyboardMarkup:
     """
-    Клавиатура раздела помощи с юридическими документами.
+    Клавиатура раздела помощи.
     """
     builder = InlineKeyboardBuilder()
     
@@ -137,7 +114,6 @@ def get_help_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="Пользовательское соглашение 📝", url="https://telegra.ph/Polzovatelskoe-soglashenie-08-15-10")
     builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
     
-    # adjust(1) выстроит все кнопки строго друг под другом (в 1 столбец)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -181,7 +157,7 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="Статистика 📊", callback_data="admin_stats", style="primary")
     builder.button(text="Пользователи 👥", callback_data="admin_users", style="primary")
     builder.button(text="Рассылка 📢", callback_data="admin_broadcast", style="primary")
-    builder.button(text="Настройки ⚙️", callback_data="settings", style="primary")
+    builder.button(text="Настройки ⚙️", callback_data="admin_settings", style="primary") # Изменил на admin_settings для нового меню
     builder.button(text="Закрыть панель 🔒", callback_data="admin_close", style="danger")
     
     builder.adjust(2, 2, 1)
@@ -209,11 +185,6 @@ def get_yes_no_keyboard(
 ) -> InlineKeyboardMarkup:
     """
     Универсальная клавиатура с кнопками Да/Нет.
-    
-    Args:
-        yes_callback: Callback для кнопки Да.
-        no_callback: Callback для кнопки Нет.
-        question: Текст вопроса.
     """
     builder = InlineKeyboardBuilder()
     
@@ -224,43 +195,72 @@ def get_yes_no_keyboard(
     return builder.as_markup()
 
 
+def get_back_keyboard(callback_data: str = "back_to_main") -> InlineKeyboardMarkup:
+    """
+    Простая клавиатура с кнопкой Назад.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Назад ↩️", callback_data=callback_data, style="danger")
+    return builder.as_markup()
+
+# =====================================================================
+# НОВЫЕ И ИЗМЕНЕННЫЕ КЛАВИАТУРЫ ДЛЯ ТАРИФОВ И АДМИНКИ
+# =====================================================================
+
+def get_tier_selection_keyboard() -> InlineKeyboardMarkup:
+    """
+    НОВОЕ: Клавиатура выбора тарифа (Обычный или VIP).
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🛡 Обычный VPN", callback_data="tier_standard", style="primary")
+    builder.button(text="🚀 Обход белых списков (VIP)", callback_data="tier_premium", style="primary")
+    builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
+    builder.adjust(1, 1, 1)
+    return builder.as_markup()
+
+
 def get_subscription_duration_keyboard(
-    price_test: float = 10,
-    price_1m: float = 100,
-    price_3m: float = 270,
-    price_6m: float = 500,
-    price_12m: float = 900
+    tier: str,
+    price_1m: float,
+    price_3m: float,
+    price_6m: float,
+    price_12m: float,
+    price_test: float = 100  # Цена за 3 дня
 ) -> InlineKeyboardMarkup:
     """
-    Клавиатура выбора срока подписки.
-    
-    Args:
-        price_test: Цена за тестовый период
-        price_1m: Цена за 1 месяц
-        price_3m: Цена за 3 месяца
-        price_6m: Цена за 6 месяцев
-        price_12m: Цена за 12 месяцев
+    ОБНОВЛЕНО: Клавиатура выбора срока подписки с учетом тарифа.
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text=f"🧪 Тест 3 дня - {int(price_test)}₽", callback_data="duration_test3d", style="primary")
+    # Для обычного тарифа показываем кнопку на 3 дня
+    if tier == "standard":
+        builder.button(text=f"🥉 3 дня - {int(price_test)}₽", callback_data="duration_test3d", style="primary")
+        
     builder.button(text=f"1 месяц - {int(price_1m)}₽", callback_data="duration_1month", style="primary")
     builder.button(text=f"3 месяца - {int(price_3m)}₽", callback_data="duration_3month", style="primary")
     builder.button(text=f"6 месяцев - {int(price_6m)}₽", callback_data="duration_6month", style="primary")
     builder.button(text=f"12 месяцев - {int(price_12m)}₽", callback_data="duration_12month", style="primary")
-    builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
     
-    builder.adjust(1, 1)
+    # Кнопка назад возвращает к выбору тарифа
+    builder.button(text="Назад ↩️", callback_data="buy", style="danger") 
+    
+    # Расстановка кнопок в один столбец
+    if tier == "standard":
+        builder.adjust(1, 1, 1, 1, 1, 1)
+    else:
+        builder.adjust(1, 1, 1, 1, 1)
+        
     return builder.as_markup()
 
 
-def get_back_keyboard(callback_data: str = "back_to_main") -> InlineKeyboardMarkup:
+def get_admin_settings_keyboard() -> InlineKeyboardMarkup:
     """
-    Простая клавиатура с кнопкой Назад.
-    
-    Args:
-        callback_data: Callback для кнопки (по умолчанию "back_to_main").
+    НОВОЕ: Клавиатура настроек админки для управления ценами.
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text="Назад ↩️", callback_data=callback_data, style="danger")
+    builder.button(text="💵 Цена Обычного ВПН", callback_data="set_price_standard", style="primary")
+    builder.button(text="💎 Цена Обхода списков", callback_data="set_price_premium", style="primary")
+    builder.button(text="⏳ Настроить скидки", callback_data="set_discounts", style="primary")
+    builder.button(text="🔙 Назад", callback_data="admin_panel", style="danger")
+    builder.adjust(1, 1, 1, 1)
     return builder.as_markup()

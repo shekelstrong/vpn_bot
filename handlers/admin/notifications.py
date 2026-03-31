@@ -9,12 +9,12 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from typing import List, Dict, Optional
 
-from loguru import logger  # <--- ИСПРАВЛЕНО: используем loguru напрямую
+from loguru import logger
 from config import settings
 
 
 def get_user_link(user_id: int, username: Optional[str] = None) -> str:
-    """Формирует кликабельную ссылку на пользователя"""
+    """Формирует кликабельную ссылку на пользователя (только для админов)"""
     if username:
         return f"<a href='tg://user?id={user_id}'>@{username}</a>"
     return f"<a href='tg://user?id={user_id}'>{user_id}</a>"
@@ -114,7 +114,6 @@ async def notify_admin_withdrawal(
         f"<i>Выберите действие ниже:</i>"
     )
     
-    # Кнопки для быстрой обработки заявки админом
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Отметить как выплаченное", callback_data=f"withdraw_done:{withdrawal_id}")],
         [InlineKeyboardButton(text="🔄 Вернуть на внутр. баланс VPN", callback_data=f"withdraw_internal:{withdrawal_id}")],
@@ -128,7 +127,7 @@ async def notify_admin_withdrawal(
             logger.warning(f"Failed to notify admin {admin_id}: {e}")
 
 
-# ==================== УВЕДОМЛЕНИЯ РЕФОВОДАМ ====================
+# ==================== УВЕДОМЛЕНИЯ РЕФОВОДАМ (АНОНИМНЫЕ) ====================
 
 async def notify_referrer_new_referral(
     bot: Bot,
@@ -137,14 +136,12 @@ async def notify_referrer_new_referral(
     level: int,
     new_user_username: Optional[str] = None
 ):
-    """Уведомление рефоводу о регистрации нового реферала"""
-    new_user_link = get_user_link(new_user_id, new_user_username)
-    
+    """Уведомление рефоводу о регистрации нового реферала (БЕЗ раскрытия личности)"""
     level_text = f" (Уровень {level})" if level > 1 else ""
     
     message = (
         f"🎉 <b>У вас новый реферал!</b>{level_text}\n\n"
-        f"👤 Профиль: {new_user_link}\n"
+        f"Кто-то зарегистрировался по вашей ссылке.\n"
         f"Теперь вы будете получать процент с его пополнений!"
     )
     
@@ -162,12 +159,10 @@ async def notify_referrer_payment(
     level: int,
     referral_username: Optional[str] = None
 ):
-    """Уведомление рефоводу о получении бонуса с пополнения"""
-    ref_link = get_user_link(referral_id, referral_username)
-    
+    """Уведомление рефоводу о получении бонуса с пополнения (БЕЗ раскрытия личности)"""
     message = (
         f"💸 <b>Вам начислен реферальный бонус!</b>\n\n"
-        f"Ваш реферал {level}-го уровня {ref_link} совершил покупку.\n"
+        f"Ваш реферал {level}-го уровня совершил покупку.\n"
         f"🎁 Зачислено на баланс: <b>+{bonus_amount:.2f}₽</b>"
     )
     
@@ -190,7 +185,6 @@ async def notify_user_purchase(
     """Уведомление пользователю об успешной покупке/продлении VPN с отправкой ссылки и QR-кода"""
     action = "продлена" if is_extension else "оформлена"
     
-    # Получаем subscription_url из Marzban
     subscription_url = ""
     if marzban_username:
         try:
@@ -205,7 +199,6 @@ async def notify_user_purchase(
         except Exception as e:
             logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
     
-    # Генерируем QR-код
     qr_file = None
     if subscription_url:
         try:
@@ -223,7 +216,6 @@ async def notify_user_purchase(
         except Exception as e:
             logger.error(f"Ошибка генерации QR-кода для {user_id}: {e}")
     
-    # Формируем сообщение с инструкциями
     if subscription_url and qr_file:
         message = (
             f"✅ <b>Оплата {amount_rub:.2f}₽ прошла успешно!</b>\n\n"

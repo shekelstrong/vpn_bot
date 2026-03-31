@@ -1,5 +1,6 @@
 import json
 import httpx
+import uuid
 from aiogram import Router, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -13,6 +14,7 @@ from keyboards.inline import (
     get_buy_keyboard,
     get_payment_keyboard,
     get_subscription_duration_keyboard,
+    get_tier_selection_keyboard,
     get_main_menu_keyboard,
 )
 from services.marzban_api import marzban_service
@@ -23,26 +25,21 @@ from handlers.admin.notifications import (
     notify_referrer_payment
 )
 from config import settings, get_db_setting, calculate_tariff_price
+from utils.states import BuySubscription
 
 router = Router()
-
-# Тарифы (дни)
-SUBSCRIPTION_PERIODS = {
-    "test3d": {"days": 3, "months": 0, "fixed_price": 10}, # Тестовый тариф
-    "1month": {"days": 30, "months": 1},
-    "3month": {"days": 90, "months": 3},
-    "6month": {"days": 180, "months": 6},
-    "12month": {"days": 365, "months": 12},
-}
 
 async def process_manual_payment(bot, session: AsyncSession, payment_invoice: PaymentInvoice):
     """Ручная обработка выдачи подписки, если вебхук потерялся по пути к серверу."""
     try:
         days = 30
+        tier = "standard" # По умолчанию обычный
+        
         if payment_invoice.payload:
             try:
                 payload_data = json.loads(payment_invoice.payload)
                 days = payload_data.get("days", 30)
+                tier = payload_data.get("tier", "standard") # Извлекаем тариф из платежа
             except: pass
 
         result = await session.execute(select(User).where(User.user_id == payment_invoice.user_id))
@@ -50,7 +47,7 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
         if not user: return
 
         payment_invoice.status = "paid"
-
+        
         transaction = Transaction(
             user_id=user.user_id,
             amount=payment_invoice.amount,
@@ -58,7 +55,7 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
             payment_method=payment_invoice.payment_method,
             status="paid",
             payment_id=payment_invoice.invoice_id,
-            description=f"Оплата подписки на {days} дней",
+            description=f"Оплата подписки на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'})",
         )
         session.add(transaction)
 
@@ -68,6 +65,9 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
         else:
             user.expire_date = now + timedelta(days=days)
 
+        # Сохраняем тариф пользователю
+        user.tier = tier
+
         marzban_account_exists = False
         if user.marzban_username:
             try:
@@ -76,17 +76,20 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
                     marzban_account_exists = True
             except: pass
 
+        # Передаем tier в Marzban для правильной маршрутизации (Vision)
         if marzban_account_exists:
-            await marzban_service.update_user_expiry(user.marzban_username, days)
+            await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier)
         else:
             new_acc = await marzban_service.create_user(
                 tg_id=user.user_id,
                 username=user.username,
                 expire_days=days,
-                data_limit_gb=0.0
+                data_limit_gb=0.0,
+                tier=tier
             )
             user.marzban_username = new_acc.get('username')
 
+        # Реферальные начисления
         referrers_bonuses = []
         percentages = settings.referral_percentages_list
         current_referrer_id = user.referrer_id
@@ -102,134 +105,183 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
             referrers_bonuses.append({
                 'level': level, 'id': referrer.user_id, 'username': referrer.username, 'bonus': bonus
             })
+            
             await notify_referrer_payment(bot, referrer.user_id, user.user_id, bonus, level, user.username)
             current_referrer_id = referrer.referrer_id
 
         await session.commit()
 
         await notify_user_purchase(
-            bot=bot, 
-            user_id=user.user_id, 
-            amount_rub=payment_invoice.amount, 
-            duration_days=days, 
+            bot=bot,
+            user_id=user.user_id,
+            amount_rub=payment_invoice.amount,
+            duration_days=days,
             is_extension=marzban_account_exists,
             marzban_username=user.marzban_username
         )
-        
-        await notify_admin_payment(bot, user.user_id, payment_invoice.amount, user.username, payment_invoice.payment_method, referrers_bonuses)
 
+        await notify_admin_payment(bot, user.user_id, payment_invoice.amount, user.username, payment_invoice.payment_method, referrers_bonuses)
         logger.info(f"Ручная обработка платежа завершена для {user.user_id}")
+
     except Exception as e:
         logger.error(f"Ошибка ручной выдачи: {e}")
         await session.rollback()
 
+
 @router.callback_query(F.data == "buy")
 @router.message(Command("buy"))
 @router.message(F.text.startswith("Купить подписку"))
-async def show_buy(callback_or_message: types.CallbackQuery | types.Message, session: AsyncSession):
-    """Показать меню покупки подписки."""
+async def show_buy(callback_or_message: types.CallbackQuery | types.Message, state: FSMContext, session: AsyncSession):
+    """Показать меню выбора тарифа."""
     if isinstance(callback_or_message, types.CallbackQuery):
         callback = callback_or_message
         message = callback.message
-        user_id = callback.from_user.id if hasattr(callback, 'from_user') else callback.from_user.id
+        user_id = callback.from_user.id
         await callback.answer()
     else:
         message = callback_or_message
         callback = None
         user_id = message.from_user.id
 
-    base_price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
-    base_price = float(base_price)
-
     result = await session.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()
-
     if not user:
         await message.answer("❌ Пользователь не найден. Нажмите /start")
         return
 
     has_subscription = user.expire_date and user.expire_date > datetime.utcnow()
 
-    text = "🛒 <b>Магазин подписок Nemo VPN</b>\n\n"
-    text += "Выберите срок подписки:\n\n"
-
+    text = "🛍 <b>Магазин подписок Nemo VPN</b>\n\n"
     if has_subscription:
         days_left = (user.expire_date - datetime.utcnow()).days
-        text += f"⭐️ <b>Ваша подписка активна ещё {days_left} дн.</b>\n"
+        text += f"⏳ <b>Ваша подписка активна ещё {days_left} дн.</b>\n"
         text += "Новая подписка продлит текущую.\n\n"
 
-    prices = {}
-    for key, period in SUBSCRIPTION_PERIODS.items():
-        if "fixed_price" in period:
-            price = float(period["fixed_price"])
-        else:
-            months = period["months"]
-            price = await calculate_tariff_price(session, base_price, months)
-        prices[key] = price
-
-        discount_text = ""
-        if "fixed_price" not in period and period["months"] > 1:
-            original_price = base_price * period["months"]
-            savings = round(original_price - price, 2)
-            discount_percent = round(savings / original_price * 100, 1)
-            discount_text = f" (экономия {savings}₽, {discount_percent}% скидка)"
-        text += f"▪️ {period['days']} дней — {int(price)}₽{discount_text}\n"
-
-    keyboard = get_subscription_duration_keyboard(
-        price_test=prices.get("test3d", 10),
-        price_1m=prices.get("1month", base_price),
-        price_3m=prices.get("3month", base_price * 3),
-        price_6m=prices.get("6month", base_price * 6),
-        price_12m=prices.get("12month", base_price * 12)
+    text += (
+        "🛡 <b>Выберите тип VPN-подписки:</b>\n\n"
+        "<b>Обычный VPN:</b>\n"
+        "Стандартный сервер для повседневных задач.\n\n"
+        "<b>🚀 Обход белых списков (VIP):</b>\n"
+        "Передовая связка на базе ядра Xray (XTLS-Reality + Vision). "
+        "Маскирует трафик под обычные запросы к разрешенным сайтам (Яндекс). "
+        "Идеально обходит ТСПУ и глубокий анализ пакетов (DPI) от Роскомнадзора."
     )
 
+    keyboard = get_tier_selection_keyboard()
+
     try:
-        # ИСПРАВЛЕНИЕ: Используем актуальный file_id и метод answer_animation для GIF
-        await message.answer_animation(
-            animation="CgACAgIAAxkBAAIE7Wm804DyYOvViOUC--9rsXLvJ8ZtAALanwACaxDgSamsbGW6emV7OgQ",
-            caption=text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+        if message.video or message.animation or message.photo:
+            await message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            # Пытаемся отправить анимацию (GIF), если это новое сообщение
+            if not callback:
+                await message.answer_animation(
+                    animation="CgACAgIAAxkBAAIE7Wm804DyYQvViOUC--9rsXLvJ8ZtAALanwACxDgSamsbGW6emV70gQ",
+                    caption=text,
+                    reply_markup=keyboard,
+                    parse_mode="HTML"
+                )
+            else:
+                await message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception as e:
-        logger.warning(f"Не удалось отправить GIF ({e}), отправляем текстом.")
-        await message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
+        logger.warning(f"Не удалось отправить/отредактировать GIF, отправляем текстом. Ошибка: {e}")
+        if callback:
+            await message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            await message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
+            
+    await state.set_state(BuySubscription.selecting_tier)
+
+
+@router.callback_query(F.data.startswith("tier_"))
+async def select_tier(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Выбор тарифа и отображение сроков."""
+    tier = callback.data.replace("tier_", "")
+    await state.update_data(tier=tier)
+    
+    # Определяем базовую цену в зависимости от тарифа
+    if tier == "premium":
+        base_price_str = await get_db_setting(session, "premium_subscription_price", str(settings.PREMIUM_PRICE_RUB))
+    else:
+        base_price_str = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
+    
+    base_price = float(base_price_str)
+    
+    price_1m = await calculate_tariff_price(session, base_price, 1)
+    price_3m = await calculate_tariff_price(session, base_price, 3)
+    price_6m = await calculate_tariff_price(session, base_price, 6)
+    price_12m = await calculate_tariff_price(session, base_price, 12)
+
+    keyboard = get_subscription_duration_keyboard(
+        tier=tier,
+        price_1m=price_1m,
+        price_3m=price_3m,
+        price_6m=price_6m,
+        price_12m=price_12m,
+        price_test=100 # Цена за 3 дня для обычного тарифа
+    )
+
+    text = "⏱ <b>Выберите срок подписки:</b>"
+
+    try:
+        if callback.message.video or callback.message.animation or callback.message.photo:
+            await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
+        else:
+            await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Ошибка редактирования меню сроков: {e}")
+
+    await state.set_state(BuySubscription.selecting_duration)
+    await callback.answer()
+
 
 @router.callback_query(F.data.startswith("duration_"))
 async def select_duration(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     """Выбор срока подписки."""
-    duration = callback.data.replace("duration_", "")
-    period = SUBSCRIPTION_PERIODS.get(duration)
+    duration = callback.data
+    data = await state.get_data()
+    tier = data.get("tier", "standard")
 
-    if not period:
-        await callback.answer("❌ Неверный тариф", show_alert=True)
+    # Получаем актуальную базовую цену
+    if tier == "premium":
+        base_price = float(await get_db_setting(session, "premium_subscription_price", str(settings.PREMIUM_PRICE_RUB)))
+    else:
+        base_price = float(await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB)))
+
+    # Определяем дни и итоговую цену
+    if duration == "duration_test3d" and tier == "standard":
+        days = 3
+        price = 100
+    elif duration == "duration_1month":
+        days = 30
+        price = await calculate_tariff_price(session, base_price, 1)
+    elif duration == "duration_3month":
+        days = 90
+        price = await calculate_tariff_price(session, base_price, 3)
+    elif duration == "duration_6month":
+        days = 180
+        price = await calculate_tariff_price(session, base_price, 6)
+    elif duration == "duration_12month":
+        days = 365
+        price = await calculate_tariff_price(session, base_price, 12)
+    else:
+        await callback.answer("Неверный тариф", show_alert=True)
         return
 
-    base_price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
-    base_price = float(base_price)
+    await state.update_data(days=days, price=int(price))
 
-    if "fixed_price" in period:
-        price = float(period["fixed_price"])
-    else:
-        months = period["months"]
-        price = await calculate_tariff_price(session, base_price, months)
-
-    await state.update_data(
-        duration=duration,
-        days=period["days"],
-        price=int(price)
-    )
-
+    tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+    
     text = (
-        "✅ <b>Выбран тариф</b>\n\n"
-        f"⏳ Срок: {period['days']} дней\n"
-        f"💰 Цена: {int(price)} ₽\n\n"
-        "Выберите способ оплаты: 👇"
+        f"✅ <b>Выбран тариф:</b> {tier_name}\n\n"
+        f"⏳ Срок: <b>{days} дней</b>\n"
+        f"💵 Цена: <b>{int(price)} ₽</b>\n\n"
+        "💳 Выберите способ оплаты:"
     )
+    
     keyboard = get_buy_keyboard()
 
     try:
-        # Улучшенная проверка на наличие медиа-контента (видео, анимация, фото)
         if callback.message.video or callback.message.animation or callback.message.photo:
             await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
         else:
@@ -237,21 +289,24 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
     except Exception as e:
         logger.error(f"Ошибка редактирования меню покупки: {e}")
 
+    await state.set_state(BuySubscription.selecting_payment_method)
     await callback.answer()
+
 
 @router.callback_query(F.data == "pay_crypto")
 async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     """Оплата через CryptoBot (USDT)."""
     user_id = callback.from_user.id
-    
     data = await state.get_data()
+    
     price_rub = data.get("price", settings.SUBSCRIPTION_PRICE_RUB)
     days = data.get("days", settings.SUBSCRIPTION_EXPIRE_DAYS)
-
+    tier = data.get("tier", "standard")
+    
     await callback.answer("⏳ Создание счета...")
-
     try:
         price_usdt = round(price_rub / settings.USDT_TO_RUB_RATE, 2)
+        
         bot_info = await callback.bot.get_me()
         bot_username = bot_info.username
 
@@ -262,17 +317,19 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
             currency="RUB",
             payment_method="cryptobot",
             status="pending",
-            payload=f'{{"days": {days}, "amount_usdt": {price_usdt}}}',
+            payload=f'{{"days": {days}, "amount_usdt": {price_usdt}, "tier": "{tier}"}}',
             expires_at=datetime.utcnow() + timedelta(hours=1)
         )
         session.add(payment_invoice)
         await session.flush()
+        
         order_id = payment_invoice.id
 
+        tier_name = "VIP" if tier == "premium" else "Обычный"
         result = await crypto_bot_service.create_invoice(
             amount_usdt=price_usdt,
             order_id=order_id,
-            description=f"Nemo VPN подписка на {days} дней ({price_rub}₽)",
+            description=f"Nemo VPN подписка на {days} дней ({tier_name})",
             paid_btn_name="Вернуться в бот",
             paid_btn_url=f"https://t.me/{bot_username}"
         )
@@ -281,14 +338,13 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
             raise Exception("Не удалось создать счет в CryptoBot")
 
         invoice_url, real_invoice_id = result
-
         payment_invoice.invoice_id = str(real_invoice_id)
         await session.commit()
 
         text = (
             "💎 <b>Оплата криптовалютой</b>\n\n"
-            f"💰 Сумма: <b>{price_usdt} USDT</b>\n"
-            f"📝 Заказ: <code>#{order_id}</code>\n\n"
+            f"Сумма: <b>{price_usdt} USDT</b>\n"
+            f"Заказ: <code>#{order_id}</code>\n\n"
             "<i>Вы можете оплатить через USDT (TRC20, TON, BEP20) или Toncoin.</i>"
         )
         keyboard = get_payment_keyboard(invoice_url, str(real_invoice_id))
@@ -302,8 +358,9 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
             pass
 
         await state.update_data(order_id=str(order_id))
-        await state.set_state("waiting_for_payment")
-        logger.info(f"Создан счет CryptoBot #{order_id} (ID: {real_invoice_id}) для {user_id}: {price_usdt} USDT")
+        await state.set_state(BuySubscription.waiting_for_payment)
+        
+        logger.info(f"Создан счет CryptoBot #{order_id} (ID: {real_invoice_id}) для {user_id}: {price_usdt} USDT (Тариф: {tier})")
 
     except Exception as e:
         logger.error(f"Ошибка создания счета CryptoBot: {e}")
@@ -313,27 +370,29 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
         )
     await callback.answer()
 
+
 @router.callback_query(F.data == "pay_card")
 async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     """Оплата банковской картой через Platega."""
     user_id = callback.from_user.id
-
     data = await state.get_data()
+    
     price = data.get("price", settings.SUBSCRIPTION_PRICE_RUB)
     days = data.get("days", settings.SUBSCRIPTION_EXPIRE_DAYS)
-
+    tier = data.get("tier", "standard")
+    
     await callback.answer("⏳ Создание счета...")
-
     try:
         import uuid
         order_id = f"platega_{user_id}_{uuid.uuid4().hex[:8]}"
-
         from services.payment_platega import create_invoice
+        
+        tier_name = "VIP" if tier == "premium" else "Обычный"
         payment_url = await create_invoice(
             amount_rub=int(price),
             order_id=order_id,
             user_id=user_id,
-            description=f"Nemo VPN подписка на {days} дней"
+            description=f"Nemo VPN подписка на {days} дней ({tier_name})"
         )
 
         if not payment_url:
@@ -346,7 +405,7 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
             currency="RUB",
             payment_method="platega",
             status="pending",
-            payload=f'{{"days": {days}}}',
+            payload=f'{{"days": {days}, "tier": "{tier}"}}',
             expires_at=datetime.utcnow() + timedelta(hours=1)
         )
         session.add(payment_invoice)
@@ -354,8 +413,8 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
 
         text = (
             "💳 <b>Счет на оплату (Банковская карта)</b>\n\n"
-            f"💰 Сумма: <b>{price}₽</b>\n"
-            f"⏳ Срок подписки: <b>{days} дней</b>\n\n"
+            f"Сумма: <b>{price} ₽</b>\n"
+            f"Срок подписки: <b>{days} дней</b>\n\n"
             "Нажмите «Оплатить» для перехода к оплате.\n"
             "Счет действителен в течение 1 часа.\n\n"
             f"ID заказа: <code>{order_id}</code>"
@@ -371,8 +430,8 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
             pass
 
         await state.update_data(invoice_id=order_id)
-        await state.set_state("waiting_for_payment")
-        logger.info(f"Создан счет Platega {order_id} для пользователя {user_id}")
+        await state.set_state(BuySubscription.waiting_for_payment)
+        logger.info(f"Создан счет Platega {order_id} для пользователя {user_id} (Тариф: {tier})")
 
     except Exception as e:
         logger.error(f"Ошибка создания счета Platega: {e}")
@@ -381,6 +440,7 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
             "Пожалуйста, попробуйте позже или выберите другой способ оплаты."
         )
     await callback.answer()
+
 
 @router.callback_query(F.data.startswith("check_payment:"))
 async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
@@ -396,12 +456,13 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
     invoice = result.scalar_one_or_none()
 
     if not invoice:
-        await callback.answer("❌ Счет не найден. Создайте новый счет.", show_alert=True)
+        await callback.answer("Счет не найден. Создайте новый счет.", show_alert=True)
         return
 
     if invoice.status == "paid":
         await callback.answer("✅ Оплата уже подтверждена!", show_alert=True)
         return
+
     if invoice.status == "expired":
         await callback.answer("❌ Срок действия счета истек", show_alert=True)
         return
@@ -422,8 +483,7 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
                     status = remote_invoice.get("status")
                     
                     if status == "paid":
-                        await _process_manual_payment(callback.bot, session, invoice)
-                        
+                        await process_manual_payment(callback.bot, session, invoice)
                         success_text = "✅ <b>Оплата подтверждена!</b> Подписка успешно выдана."
                         if callback.message.video or callback.message.animation or callback.message.photo:
                             await callback.message.edit_caption(caption=success_text, parse_mode="HTML")
@@ -433,7 +493,6 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
                     elif status in ["expired", "deleted"]:
                         invoice.status = "expired"
                         await session.commit()
-                        
                         fail_text = "❌ <b>Счет отменен или просрочен.</b>"
                         if callback.message.video or callback.message.animation or callback.message.photo:
                             await callback.message.edit_caption(caption=fail_text, parse_mode="HTML")
@@ -445,11 +504,11 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
 
     await callback.answer("⏳ Оплата ещё не поступила. Если вы только что оплатили, подождите минутку...", show_alert=True)
 
+
 @router.callback_query(F.data == "cancel_payment")
 async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
     """Отмена оплаты."""
     await state.clear()
-    
     text = "❌ Оплата отменена.\n\nВыберите действие:"
     keyboard = get_main_menu_keyboard()
     
@@ -460,5 +519,5 @@ async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
             await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception:
         pass
-    
+        
     await callback.answer()

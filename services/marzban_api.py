@@ -15,11 +15,11 @@ class MarzbanService:
         self.base_url = settings.marzban_api_url
         self._token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
-        
+
         # ИСПРАВЛЕНИЕ: verify=False позволяет локально игнорировать строгие проверки SSL сертификатов на macOS
         self._client = httpx.AsyncClient(timeout=30.0, verify=False)
-        
-        # VLESS Reality настройки
+
+        # VLESS Reality настройки (используются как резервные)
         self.vless_config = {
             "port": settings.VLESS_PORT,
             "sni": settings.VLESS_SNI,
@@ -96,7 +96,7 @@ class MarzbanService:
                 return response.json()
 
             except httpx.HTTPStatusError as e:
-                # ИСПРАВЛЕНИЕ: Не делаем ретраи для 404 ошибки (пользователя нет)
+                # Не делаем ретраи для 404 ошибки (пользователя нет)
                 if e.response.status_code == 404:
                     raise
 
@@ -120,26 +120,39 @@ class MarzbanService:
         username: Optional[str] = None,
         expire_days: int = 30,
         expire_hours: Optional[int] = None,
-        data_limit_gb: float = 0.0
+        data_limit_gb: float = 0.0,
+        tier: str = "standard"  # НОВОЕ: Добавлен параметр тарифа
     ) -> Dict[str, Any]:
         """Создать нового пользователя в Marzban."""
         marzban_username = f"user_{tg_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+
         if expire_hours:
             expire_date = datetime.utcnow() + timedelta(hours=expire_hours)
         else:
             expire_date = datetime.utcnow() + timedelta(days=expire_days)
-        
-        proxies = {
-            "vless": {
-                "flow": ""
+
+        # НОВОЕ: Распределение по Inbounds в зависимости от тарифа + обход ТСПУ
+        if tier == "premium":
+            proxies = {
+                "vless": {
+                    "flow": "xtls-rprx-vision"
+                }
             }
-        }
-        inbounds = {
-            "vless": ["vless-reality"]
-        }
-        
+            inbounds = {
+                "vless": ["vless-reality-whitelist"]
+            }
+        else:
+            proxies = {
+                "vless": {
+                    "flow": ""
+                }
+            }
+            inbounds = {
+                "vless": ["vless-reality-standard"]
+            }
+
         data_limit_bytes = int(data_limit_gb * 1024 * 1024 * 1024) if data_limit_gb > 0 else 0
-        
+
         user_data = {
             "username": marzban_username,
             "proxies": proxies,
@@ -148,10 +161,10 @@ class MarzbanService:
             "data_limit": data_limit_bytes if data_limit_bytes > 0 else None,
             "status": "active",
         }
-        
+
         try:
             result = await self._request("POST", "/user", json=user_data)
-            logger.info(f"Создан пользователь {marzban_username} для TG {tg_id}")
+            logger.info(f"Создан пользователь {marzban_username} (Тариф: {tier}) для TG {tg_id}")
             return result
         except Exception as e:
             logger.error(f"Ошибка создания пользователя {marzban_username}: {e}")
@@ -184,39 +197,50 @@ class MarzbanService:
     async def update_user_expiry(
         self,
         marzban_username: str,
-        extra_days: int
+        extra_days: int,
+        tier: str = "standard"  # НОВОЕ: Обновляем инбаунд при продлении (апгрейд тарифа)
     ) -> Dict[str, Any]:
         """Продлить подписку пользователя и снять ограничения триала."""
         user = await self.get_user(marzban_username)
-        
+
         if not user:
             raise ValueError(f"Пользователь {marzban_username} не найден в Marzban для продления")
-            
+
         current_expire = user.get("expire") or 0
         current_time = int(datetime.utcnow().timestamp())
-        
+
         # Если подписка еще активна, плюсуем к ней. Если уже истекла - отсчитываем от сейчас!
         if current_expire > current_time:
             new_expire = current_expire + (extra_days * 24 * 60 * 60)
         else:
             new_expire = current_time + (extra_days * 24 * 60 * 60)
-            
+
+        # НОВОЕ: Переводим на нужный инбаунд, если юзер сменил тариф
+        if tier == "premium":
+            proxies = {"vless": {"flow": "xtls-rprx-vision"}}
+            inbounds = {"vless": ["vless-reality-whitelist"]}
+        else:
+            proxies = {"vless": {"flow": ""}}
+            inbounds = {"vless": ["vless-reality-standard"]}
+
         update_data = {
             "expire": new_expire,
-            "data_limit": 0, # Снимаем триальный лимит по трафику (устанавливаем безлимит)
-            "status": "active" # Принудительно активируем аккаунт, если он был отключен
+            "data_limit": 0,  # Снимаем триальный лимит по трафику (устанавливаем безлимит)
+            "status": "active",  # Принудительно активируем аккаунт, если он был отключен
+            "proxies": proxies,
+            "inbounds": inbounds
         }
-        
+
         try:
             result = await self._request("PUT", f"/user/{marzban_username}", json=update_data)
-            
+
             # Сбрасываем счетчик скачанного триального трафика
             try:
                 await self.reset_user_traffic(marzban_username)
             except Exception:
                 pass
-                
-            logger.info(f"Продлена подписка {marzban_username} на {extra_days} дней (установлен безлимит)")
+
+            logger.info(f"Продлена подписка {marzban_username} на {extra_days} дней (Тариф: {tier})")
             return result
         except Exception as e:
             logger.error(f"Ошибка продления подписки {marzban_username}: {e}")
@@ -264,7 +288,7 @@ class MarzbanService:
         marzban_username: str,
         subscription_url: str
     ) -> str:
-        """Сгенерировать VLESS ссылку для пользователя."""
+        """Сгенерировать VLESS ссылку для пользователя (резервный метод)."""
         config = self.vless_config
         uuid = marzban_username
         vless_link = (

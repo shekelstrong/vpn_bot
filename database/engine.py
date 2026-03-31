@@ -4,7 +4,9 @@
 """
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker, AsyncEngine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
 from typing import Optional
+
 from config import settings
 
 class Base(DeclarativeBase):
@@ -65,6 +67,16 @@ async def drop_tables():
 async def init_db():
     """Инициализировать базу данных: создать таблицы."""
     await create_tables()
+    
+    # Безопасная миграция: добавляем колонку tier "на горячую", если её нет.
+    # Это гарантированно сохранит всех старых пользователей, их балансы и подписки.
+    async with get_engine().begin() as conn:
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN tier VARCHAR(50) DEFAULT 'standard'"))
+        except Exception:
+            # Ошибка здесь означает, что колонка уже успешно создана ранее.
+            # Бот просто проигнорирует ошибку и продолжит работу в штатном режиме.
+            pass
 
 async def close_db():
     """Закрыть соединения с базой данных."""

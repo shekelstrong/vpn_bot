@@ -21,7 +21,7 @@ class Settings(BaseSettings):
         description="URL подключения к базе данных"
     )
     POSTGRES_PASSWORD: str = Field(
-        default="", 
+        default="",
         description="Пароль от PostgreSQL (нужен для Docker)"
     )
 
@@ -41,11 +41,11 @@ class Settings(BaseSettings):
     REFERRAL_PERCENTAGES: str = Field(default="15,10,5", description="Проценты реферальной системы (уровень 1,2,3)")
     REFERRAL_MIN_WITHDRAW: int = Field(default=1000, description="Минимальная сумма вывода (рублей)")
 
-    # VLESS Reality настройки
+    # VLESS Reality настройки (Стандарт)
     VLESS_PORT: int = Field(default=8444, description="Порт VLESS Reality")
     VLESS_SNI: str = Field(default="dl.google.com", description="SNI для VLESS Reality")
     VLESS_PUBLIC_KEY: str = Field(
-        default="WWB0761AFkXyj17WK7shhvGMvMl2NrRpLLfvTnH7TkA",
+        default="WWBO76lAFkXyj17WK7shhvGMvMl2NrRpLLfvTnH7TkA",
         description="Публичный ключ VLESS Reality"
     )
     VLESS_SHORT_ID: str = Field(default="fb8e00", description="Short ID для VLESS Reality")
@@ -55,9 +55,12 @@ class Settings(BaseSettings):
     TRIAL_DATA_LIMIT_GB: int = Field(default=1, description="Лимит трафика для триала (GB)")
     TRIAL_EXPIRE_HOURS: int = Field(default=24, description="Время действия триала (часы)")
 
-    # Subscription настройки
+    # Subscription настройки (Обычный тариф)
     SUBSCRIPTION_PRICE_RUB: int = Field(default=100, description="Цена подписки в рублях")
     SUBSCRIPTION_EXPIRE_DAYS: int = Field(default=30, description="Срок подписки в днях")
+    
+    # Subscription настройки (VIP тариф - Обход белых списков)
+    PREMIUM_PRICE_RUB: int = Field(default=300, description="Цена VIP подписки в рублях")
 
     # Notification intervals (в минутах до истечения)
     NOTIFICATION_INTERVALS: str = Field(
@@ -90,35 +93,32 @@ class Settings(BaseSettings):
         """Возвращает полный URL API Marzban."""
         return f"{self.MARZBAN_URL}/api"
 
-
 async def get_db_setting(session: AsyncSession, key: str, default: str = "") -> str:
     """Получить настройку из БД."""
     from database.models import BotSettings
     from sqlalchemy import select
-    
+
     result = await session.execute(select(BotSettings).filter(BotSettings.key == key))
     setting = result.scalar_one_or_none()
     return setting.value if setting else default
-
 
 async def get_db_settings_dict(session: AsyncSession) -> dict:
     """Получить все настройки из БД."""
     from database.models import BotSettings
     from sqlalchemy import select
-    
+
     result = await session.execute(select(BotSettings))
     settings = result.scalars().all()
     return {s.key: s.value for s in settings}
-
 
 async def update_db_setting(session: AsyncSession, key: str, value: str, description: Optional[str] = None) -> None:
     """Обновить или создать настройку в БД."""
     from database.models import BotSettings
     from sqlalchemy import select
-    
+
     result = await session.execute(select(BotSettings).filter(BotSettings.key == key))
     setting = result.scalar_one_or_none()
-    
+
     if setting:
         setting.value = value
         setting.description = description
@@ -127,13 +127,14 @@ async def update_db_setting(session: AsyncSession, key: str, value: str, descrip
         session.add(BotSettings(key=key, value=value, description=description))
         await session.commit()
 
-
 async def init_default_settings(session: AsyncSession) -> None:
     """Инициализация дефолтных настроек в БД."""
     from database.models import BotSettings
-    
+    from sqlalchemy import select
+
     defaults = {
-        "subscription_price": ("100", "Цена подписки в рублях"),
+        "subscription_price": ("100", "Цена обычной подписки в рублях"),
+        "premium_subscription_price": ("300", "Цена VIP подписки (Обход белых списков) в рублях"),
         "subscription_duration": ("30", "Базовый срок подписки в днях"),
         "trial_hours": ("24", "Срок действия триала в часах"),
         "trial_data_limit": ("1", "Лимит трафика для триала в GB"),
@@ -146,29 +147,27 @@ async def init_default_settings(session: AsyncSession) -> None:
         "discount_6month": ("17", "Скидка на 6 месяцев (в процентах)"),
         "discount_12month": ("25", "Скидка на 12 месяцев (в процентах)"),
     }
-    
+
     for key, (value, desc) in defaults.items():
         result = await session.execute(select(BotSettings).where(BotSettings.key == key))
         if not result.scalar_one_or_none():
             session.add(BotSettings(key=key, value=value, description=desc))
-    
-    await session.commit()
 
+    await session.commit()
 
 async def calculate_tariff_price(session: AsyncSession, base_price: float, months: int) -> float:
     """Рассчитать цену с учетом скидки для указанного срока."""
     from database.models import BotSettings
-    
+
     discount_key = f"discount_{months}month" if months >= 3 else None
     if not discount_key:
         return base_price * months
-    
+
     discount_percent = await get_db_setting(session, discount_key, "0")
     discount = float(discount_percent) / 100
     final_price = base_price * months * (1 - discount)
-    
-    return round(final_price, 2)
 
+    return round(final_price, 2)
 
 # Глобальный экземпляр настроек
 settings = Settings()

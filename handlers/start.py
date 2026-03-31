@@ -5,6 +5,7 @@ from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 import uuid
@@ -91,9 +92,16 @@ async def cmd_start(message: Message, session: AsyncSession, bot: Bot):
             referrer_id=referrer_id
         )
         session.add(user)
-        await session.commit()
-        await session.refresh(user)
-        logger.info(f"Создан новый пользователь: {user_id}")
+        
+        try:
+            await session.commit()
+            await session.refresh(user)
+            logger.info(f"Создан новый пользователь: {user_id}")
+        except IntegrityError:
+            # Перехватываем дубль от параллельного запроса
+            await session.rollback()
+            result = await session.execute(select(User).where(User.user_id == user_id))
+            user = result.scalar_one_or_none()
 
         # БЛОК УВЕДОМЛЕНИЙ ПРИ РЕГИСТРАЦИИ
         referrers_chain = []

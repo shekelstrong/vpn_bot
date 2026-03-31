@@ -4,13 +4,12 @@
 
 from aiogram.fsm.state import State, StatesGroup
 
-
 class BuySubscription(StatesGroup):
     """Состояния для процесса покупки подписки."""
+    selecting_tier = State()  # НОВОЕ СОСТОЯНИЕ: Выбор тарифа (Обычный / Обход белых списков)
     selecting_duration = State()
     selecting_payment_method = State()
     waiting_for_payment = State()
-
 
 class AdminPanel(StatesGroup):
     """Состояния для админ-панели."""
@@ -20,14 +19,13 @@ class AdminPanel(StatesGroup):
     waiting_for_broadcast_confirm = State()
     waiting_for_reset_trial = State()
 
-
 class AdminSettings(StatesGroup):
     """Состояния для настроек бота."""
     waiting_for_tariff_value = State()
+    waiting_for_premium_tariff_value = State()  # НОВОЕ СОСТОЯНИЕ: Изменение цены VIP-тарифа
     waiting_for_referral_value = State()
     waiting_for_trial_value = State()
     waiting_for_discount_value = State()
-
 
 class Support(StatesGroup):
     """Состояния для техподдержки."""
