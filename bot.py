@@ -44,7 +44,6 @@ from handlers.trial import router as trial_router
 from handlers.buy import router as buy_router
 from handlers.help import router as help_router
 from handlers.admin import router as admin_router
-from handlers.admin.settings import router as admin_settings_router
 from handlers.referrals import router as referrals_router
 
 # Импортируем сервисы CryptoBot v2
@@ -53,7 +52,6 @@ from services.crypto_webhook import handle_crypto_webhook_update
 
 # Импортируем вебхук-сервер для Platega
 from utils.webhook_server import webhook_server
-
 
 
 async def update_trial_command_for_user(user_id: int, has_active_subscription: bool):
@@ -144,7 +142,6 @@ dp.include_router(trial_router)
 dp.include_router(buy_router)
 dp.include_router(help_router)
 dp.include_router(admin_router)
-dp.include_router(admin_settings_router)
 dp.include_router(referrals_router)
 
 
