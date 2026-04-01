@@ -157,7 +157,8 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="Статистика 📊", callback_data="admin_stats", style="primary")
     builder.button(text="Пользователи 👥", callback_data="admin_users", style="primary")
     builder.button(text="Рассылка 📢", callback_data="admin_broadcast", style="primary")
-    builder.button(text="Настройки ⚙️", callback_data="admin_settings", style="primary") # Изменил на admin_settings для нового меню
+    # ИСПРАВЛЕНИЕ: изменили admin_settings на settings, чтобы срабатывал хендлер
+    builder.button(text="Настройки ⚙️", callback_data="settings", style="primary")
     builder.button(text="Закрыть панель 🔒", callback_data="admin_close", style="danger")
     
     builder.adjust(2, 2, 1)
@@ -225,16 +226,15 @@ def get_subscription_duration_keyboard(
     price_3m: float,
     price_6m: float,
     price_12m: float,
-    price_test: float = 100  # Цена за 3 дня
+    price_test: float
 ) -> InlineKeyboardMarkup:
     """
     ОБНОВЛЕНО: Клавиатура выбора срока подписки с учетом тарифа.
     """
     builder = InlineKeyboardBuilder()
     
-    # Для обычного тарифа показываем кнопку на 3 дня
-    if tier == "standard":
-        builder.button(text=f"🥉 3 дня - {int(price_test)}₽", callback_data="duration_test3d", style="primary")
+    # ИСПРАВЛЕНИЕ: Теперь кнопка на 3 дня показывается для всех тарифов
+    builder.button(text=f"🥉 3 дня - {int(price_test)}₽", callback_data="duration_test3d", style="primary")
         
     builder.button(text=f"1 месяц - {int(price_1m)}₽", callback_data="duration_1month", style="primary")
     builder.button(text=f"3 месяца - {int(price_3m)}₽", callback_data="duration_3month", style="primary")
@@ -244,11 +244,8 @@ def get_subscription_duration_keyboard(
     # Кнопка назад возвращает к выбору тарифа
     builder.button(text="Назад ↩️", callback_data="buy", style="danger") 
     
-    # Расстановка кнопок в один столбец
-    if tier == "standard":
-        builder.adjust(1, 1, 1, 1, 1, 1)
-    else:
-        builder.adjust(1, 1, 1, 1, 1)
+    # Расстановка кнопок в один столбец для всех
+    builder.adjust(1, 1, 1, 1, 1, 1)
         
     return builder.as_markup()
 

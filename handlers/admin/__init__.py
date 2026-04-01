@@ -1,4 +1,10 @@
-# Импортируем роутер из файла с логикой админки
-from .admin_panel import router
+from aiogram import Router
+from . import admin_panel
+from . import settings
 
-# Это позволит bot.py видеть роутер просто как handlers.admin.router
+# Создаем общий роутер для всей админки
+router = Router(name="admin_main_router")
+
+# Подключаем в него роутеры из соседних файлов
+router.include_router(admin_panel.router)
+router.include_router(settings.router)

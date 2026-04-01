@@ -202,8 +202,10 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
     # Определяем базовую цену в зависимости от тарифа
     if tier == "premium":
         base_price_str = await get_db_setting(session, "premium_subscription_price", str(settings.PREMIUM_PRICE_RUB))
+        price_test = 100  # Цена 3 дней для VIP
     else:
         base_price_str = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
+        price_test = 10   # Цена 3 дней для Обычного
     
     base_price = float(base_price_str)
     
@@ -218,7 +220,7 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
         price_3m=price_3m,
         price_6m=price_6m,
         price_12m=price_12m,
-        price_test=100 # Цена за 3 дня для обычного тарифа
+        price_test=price_test
     )
 
     text = "⏱ <b>Выберите срок подписки:</b>"
@@ -248,10 +250,10 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
     else:
         base_price = float(await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB)))
 
-    # Определяем дни и итоговую цену
-    if duration == "duration_test3d" and tier == "standard":
+    # Определяем дни и итоговую цену (ИСПРАВЛЕНО ДЛЯ 3 ДНЕЙ)
+    if duration == "duration_test3d":
         days = 3
-        price = 100
+        price = 100 if tier == "premium" else 10
     elif duration == "duration_1month":
         days = 30
         price = await calculate_tariff_price(session, base_price, 1)
