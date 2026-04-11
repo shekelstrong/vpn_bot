@@ -6,6 +6,8 @@
 """
 
 import os
+import io
+import qrcode
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, BufferedInputFile
 from typing import List, Dict, Optional
@@ -175,6 +177,17 @@ async def notify_referrer_payment(
 
 # ==================== УВЕДОМЛЕНИЯ ПОЛЬЗОВАТЕЛЯМ ====================
 
+def generate_qr(data: str) -> BufferedInputFile:
+    """Генерация QR-кода в памяти."""
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    bio = io.BytesIO()
+    img.save(bio, "PNG")
+    bio.seek(0)
+    return BufferedInputFile(bio.read(), filename="qr.png")
+
 async def notify_user_purchase(
     bot: Bot,
     user_id: int,
@@ -200,30 +213,21 @@ async def notify_user_purchase(
         except Exception as e:
             logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
     
-    qr_file = None
-    if subscription_url:
-        try:
-            import qrcode
-            import io
-            qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            qr.add_data(subscription_url)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            bio = io.BytesIO()
-            img.save(bio, "PNG")
-            bio.seek(0)
-            qr_file = BufferedInputFile(bio.read(), filename="qr.png")
-        except Exception as e:
-            logger.error(f"Ошибка генерации QR-кода для {user_id}: {e}")
-    
     # Текст основной инструкции (общий для всех)
     instruction_base = (
         f"✅ <b>Оплата {amount_rub:.2f}₽ прошла успешно!</b>\n\n"
         f"Ваша подписка на VPN {action}.\n"
         f"⏳ Добавлено времени: <b>{duration_days} дней</b>\n\n"
-        f"🔗 <b>Ваша ссылка на подписку:</b>\n"
-        f"<code>{subscription_url}</code>\n"
-        "<i>(Нажмите на ссылку, чтобы скопировать)</i>\n\n"
+    )
+    
+    if subscription_url:
+        instruction_base += (
+            f"🔗 <b>Ваша ссылка на подписку:</b>\n"
+            f"<code>{subscription_url}</code>\n"
+            "<i>(Нажмите на ссылку, чтобы скопировать)</i>\n\n"
+        )
+        
+    instruction_base += (
         "📱 <b>Инструкция по подключению (V2Box):</b>\n"
         "1. Установите <b>V2Box</b> (<a href='https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690'>iOS</a> / <a href='https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box'>Android</a>)\n"
         "2. В приложении перейдите во вкладку <b>Configs</b>.\n"
@@ -249,18 +253,25 @@ async def notify_user_purchase(
         final_message = instruction_base + "Приятного пользования Nemo VPN! 🌊"
 
     try:
-        # 1. Отправляем основное сообщение (фото QR + текст)
-        if subscription_url and qr_file:
+        # 1. Отправляем основное текстовое сообщение
+        await bot.send_message(
+            user_id, 
+            final_message, 
+            parse_mode="HTML", 
+            disable_web_page_preview=True
+        )
+        
+        # 2. Если удалось получить ссылку, генерируем и отправляем QR-код отдельно
+        if subscription_url:
+            qr_file = generate_qr(subscription_url)
             await bot.send_photo(
                 user_id,
                 photo=qr_file,
-                caption=final_message,
+                caption="Ваш QR-код для быстрого подключения 👆",
                 parse_mode="HTML"
             )
-        else:
-            await bot.send_message(user_id, final_message, parse_mode="HTML")
         
-        # 2. Для VIP тарифа отправляем видео-инструкцию
+        # 3. Для VIP тарифа отправляем видео-инструкцию
         if tier == "premium":
             video_path = "marshrut.mp4"
             if os.path.exists(video_path):
