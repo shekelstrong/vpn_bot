@@ -12,7 +12,13 @@ class MarzbanService:
     """
 
     def __init__(self):
-        self.base_url = settings.marzban_api_url
+        # Исправление: Гарантируем корректный базовый URL с /api
+        base = settings.marzban_api_url.rstrip('/')
+        if not base.endswith('/api'):
+            self.base_url = f"{base}/api"
+        else:
+            self.base_url = base
+            
         self._token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
 
@@ -48,6 +54,7 @@ class MarzbanService:
             "password": settings.MARZBAN_ADMIN_PASSWORD,
         }
         try:
+            logger.info(f"Запрос токена Marzban API: {url}")
             response = await self._client.post(url, data=data)
             response.raise_for_status()
             result = response.json()
