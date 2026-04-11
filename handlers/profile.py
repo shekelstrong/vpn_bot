@@ -75,7 +75,7 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, s
             "вам необходимо применить ключ маршрутизации:\n\n"
             "🔑 <b>Ключ маршрутизации:</b>\n"
             "<code>v2box://routes?multi=W3sibGlzdCI6WyJnZW9zaXRlOnJlIiwiZG9tYWluOnJlIiwiZG9tYWluO0GA0YQiXSwiaXNFbmFibGUiOnRydWUsIm1hdGNoTW9kZSI6ImRvbWFpbiIsIm5hbWUiOiJyb3V0ZS4zRjFENTdBOS0xRkZELTQ5MkMtOTY2NS1BRTJDNDU4QzE0QUIiLCJyZW1hcmsiOiJEaXJlY3QgUlUiLCJsaXN0SVAiOlsiZ2VvaXA6cnUiLCJnZW9pcDpwcml2YXRlIl0sInR5cGUiOiJJUCIsInRhZyI6ImRpcmVjdCJ9XQ==</code>\n\n"
-            "👇 <b>Ниже мы отправили видео-инструкцию, как это сделать за 10 секунд.</b>\n"
+            "📽 <a href='https://t.me/nemo_vpn_official/51'><b>Посмотреть видео-инструкцию (10 секунд)</b></a>\n"
             "На уровне нашего сервера для вас включен жесткий БЛОК на посещение Ру-сервисов через VPN, "
             "поэтому они будут работать только напрямую с вашего провайдера — это делает ваш серфинг невидимым для проверок!"
         )
@@ -95,17 +95,6 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, s
         photo=qr_file,
         caption="Ваш QR-код для подключения 👆"
     )
-
-    if is_premium:
-        video_path = "marshrut.mp4"
-        if os.path.exists(video_path):
-            await message.answer_video(
-                video=FSInputFile(video_path),
-                caption="🎥 Видео-инструкция по настройке VIP-маршрутизации",
-                parse_mode="HTML"
-            )
-        else:
-            logger.error(f"Файл видео {video_path} не найден!")
 
 
 @router.callback_query(F.data == "profile")
@@ -248,7 +237,9 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
                     "примените ключ маршрутизации:\n\n"
                     "🔑 <b>Ключ маршрутизации:</b>\n"
                     "<code>v2box://routes?multi=W3sibGlzdCI6WyJnZW9zaXRlOnJlIiwiZG9tYWluOnJlIiwiZG9tYWluO0GA0YQiXSwiaXNFbmFibGUiOnRydWUsIm1hdGNoTW9kZSI6ImRvbWFpbiIsIm5hbWUiOiJyb3V0ZS4zRjFENTdBOS0xRkZELTQ5MkMtOTY2NS1BRTJDNDU4QzE0QUIiLCJyZW1hcmsiOiJEaXJlY3QgUlUiLCJsaXN0SVAiOlsiZ2VvaXA6cnUiLCJnZW9pcDpwcml2YXRlIl0sInR5cGUiOiJJUCIsInRhZyI6ImRpcmVjdCJ9XQ==</code>\n\n"
-                    "👇 <b>Ниже мы отправили видео-инструкцию, как это сделать за 10 секунд.</b>"
+                    "📽 <a href='https://t.me/nemo_vpn_official/51'><b>Посмотреть видео-инструкцию (10 секунд)</b></a>\n"
+                    "На уровне нашего сервера для вас включен жесткий БЛОК на посещение Ру-сервисов через VPN, "
+                    "поэтому они будут работать только напрямую с вашего провайдера — это делает ваш серфинг невидимым для проверок!"
                 )
                 link_text += premium_note
             else:
@@ -267,15 +258,6 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
                     photo=qr_file,
                     caption="Ваш QR-код для подключения 👆"
                 )
-
-            if is_premium:
-                video_path = "marshrut.mp4"
-                if os.path.exists(video_path):
-                    await callback.message.answer_video(
-                        video=FSInputFile(video_path),
-                        caption="🎥 Видео-инструкция по настройке VIP-маршрутизации",
-                        parse_mode="HTML"
-                    )
 
             logger.info(f"Пользователь {user_id} получил ссылку на подписку")
         else:

@@ -5,11 +5,10 @@
 - Запрос на вывод средств
 """
 
-import os
 import io
 import qrcode
 from aiogram import Bot
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, BufferedInputFile
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 from typing import List, Dict, Optional
 
 from loguru import logger
@@ -244,7 +243,7 @@ async def notify_user_purchase(
             "вам необходимо применить ключ маршрутизации:\n\n"
             "🔑 <b>Ключ маршрутизации:</b>\n"
             "<code>v2box://routes?multi=W3sibGlzdCI6WyJnZW9zaXRlOnJ1IiwiZG9tYWluOnJ1IiwiZG9tYWluOtGA0YQiXSwiaXNFbmFibGUiOnRydWUsIm1hdGNoTW9kZSI6ImRvbWFpbiIsIm5hbWUiOiJyb3V0ZS4zRjFENTdBOS0xRkZELTQ5MkMtOTY2NS1BRTJDNDU4QzE0QUIiLCJyZW1hcmsiOiJEaXJlY3QgUlUiLCJsaXN0SVAiOlsiZ2VvaXA6cnUiLCJnZW9pcDpwcml2YXRlIl0sInR5cGUiOiJJUCIsInRhZyI6ImRpcmVjdCJ9XQ==</code>\n\n"
-            "👇 <b>Ниже мы отправили видео-инструкцию, как это сделать за 10 секунд.</b>\n"
+            "📽 <a href='https://t.me/nemo_vpn_official/51'><b>Посмотреть видео-инструкцию (10 секунд)</b></a>\n"
             "На уровне нашего сервера для вас включен жесткий БЛОК на посещение РУ-сервисов через VPN, "
             "поэтому они будут работать только напрямую с вашего провайдера — это делает ваш серфинг невидимым для проверок!"
         )
@@ -253,7 +252,7 @@ async def notify_user_purchase(
         final_message = instruction_base + "Приятного пользования Nemo VPN! 🌊"
 
     try:
-        # 1. Отправляем основное текстовое сообщение
+        # 1. Отправляем основное текстовое сообщение (disable_web_page_preview=True, чтобы не было гигантских превью от ссылок)
         await bot.send_message(
             user_id, 
             final_message, 
@@ -270,19 +269,6 @@ async def notify_user_purchase(
                 caption="Ваш QR-код для быстрого подключения 👆",
                 parse_mode="HTML"
             )
-        
-        # 3. Для VIP тарифа отправляем видео-инструкцию
-        if tier == "premium":
-            video_path = "marshrut.mp4"
-            if os.path.exists(video_path):
-                await bot.send_video(
-                    user_id,
-                    video=FSInputFile(video_path),
-                    caption="🎬 Видео-инструкция по настройке VIP-маршрутизации",
-                    parse_mode="HTML"
-                )
-            else:
-                logger.error(f"Файл видео {video_path} не найден!")
 
     except Exception as e:
         logger.warning(f"Failed to notify user {user_id}: {e}")
