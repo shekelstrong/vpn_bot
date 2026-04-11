@@ -1,8 +1,9 @@
 import io
+import os
 import qrcode
 from aiogram import Router, F, types
 from aiogram.filters import Command
-from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
@@ -48,38 +49,65 @@ def generate_qr(data: str) -> BufferedInputFile:
     return BufferedInputFile(bio.read(), filename="qr.png")
 
 
-async def send_subscription_info(message: types.Message | types.CallbackQuery, subscription_url: str):
+async def send_subscription_info(message: types.Message | types.CallbackQuery, subscription_url: str, vless_link: str = "", user=None):
     """Отправить Умную ссылку для платной подписки."""
     if isinstance(message, types.CallbackQuery):
         message = message.message
 
-    qr_file = generate_qr(subscription_url)
+    # Определяем, является ли пользователь VIP
+    is_premium = False
+    if user:
+        if hasattr(user, "tier") and getattr(user, "tier") == "premium":
+            is_premium = True
+        elif vless_link and "8445" in vless_link:
+            is_premium = True
+
+    qr_file = generate_qr(subscription_url or vless_link)
 
     success_text = (
         f"✅ <b>Ваша подписка активна!</b>\n\n"
-        "🔗 <b>Ваша Умная ссылка:</b>\n"
+        f"🔗 <b>Ваша ссылка на подписку:</b>\n"
         f"<code>{subscription_url}</code>\n"
-        "<i>(Рекомендуется! Сама обновится при смене IP, скрыта от РКН)</i>\n\n"
-        "📱 <b>Инструкция для iOS и Android:</b>\n"
-        "1. Установите приложение <b>Hiddify</b> из магазина приложений.\n"
-        "2. Откройте приложение и нажмите <b>«+»</b> в правом верхнем углу.\n"
-        "3. Нажмите <b>«Добавить из буфера обмена»</b> — ссылка скопируется автоматически при нажатии на неё выше.\n"
-        "4. Нажмите огромную круглую кнопку для подключения.\n\n"
-        "💻 <b>Инструкция для Windows и Mac:</b>\n"
-        "1. Скачайте Hiddify и откройте его.\n"
-        "2. Нажмите на текст ссылки выше, чтобы скопировать её.\n"
-        "3. В приложении нажмите <b>«+»</b> → <b>«Добавить из буфера обмена»</b>.\n\n"
-        "📷 <b>Альтернативный способ (QR-код):</b>\n"
-        "Если вы активируете VPN на компьютере, можете отсканировать QR-код из этого сообщения через приложение на телефоне.\n\n"
-        "⚠️ Не передавайте ссылку третьим лицам!\n\n"
-        "Если возникнут проблемы с подключением, напишите в поддержку по кнопке «Помощь 🆘» из главного меню."
+        "<i>(Нажмите на ссылку, чтобы скопировать)</i>\n\n"
+        "📱 <b>Инструкция по подключению (V2Box):</b>\n"
+        "1. Установите <b>V2Box</b> (<a href='https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690'>iOS</a> / <a href='https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box'>Android</a>)\n"
+        "2. В приложении перейдите во вкладку <b>Configs</b>.\n"
+        "3. Нажмите <b>«+»</b> → <b>«Import V2ray URL from Clipboard»</b>.\n"
+        "4. На главной (Home) нажмите <b>«Slide to Connect»</b>.\n\n"
     )
+
+    if is_premium:
+        premium_note = (
+            "🚀 <b>Настройка умной маршрутизации (VIP):</b>\n\n"
+            "Мы специально не встраиваем обход блокировок в основной ключ, чтобы максимально скрыть работу VPN от систем РКН. "
+            "Для корректной работы российских сервисов (Госуслуги, банки) напрямую, а заблокированных (Instagram, X) через VPN, "
+            "вам необходимо применить ключ маршрутизации:\n\n"
+            "🔑 <b>Ключ маршрутизации:</b>\n"
+            "<code>v2box://routes?multi=W3sibGlzdCI6WyJnZW9zaXRlOnJ1IiwiZG9tYWluOnJ1IiwiZG9tYWluOtGA0YQiXSwiaXNFbmFibGUiOnRydWUsIm1hdGNoTW9kZSI6ImRvbWFpbiIsIm5hbWUiOiJyb3V0ZS4zRjFENTdBOS0xRkZELTQ5MkMtOTY2NS1BRTJDNDU4QzE0QUIiLCJyZW1hcmsiOiJEaXJlY3QgUlUiLCJsaXN0SVAiOlsiZ2VvaXA6cnUiLCJnZW9pcDpwcml2YXRlIl0sInR5cGUiOiJJUCIsInRhZyI6ImRpcmVjdCJ9XQ==</code>\n\n"
+            "👇 <b>Ниже мы отправили видео-инструкцию, как это сделать за 10 секунд.</b>\n"
+            "На уровне нашего сервера для вас включен жесткий БЛОК на посещение РУ-сервисов через VPN, "
+            "поэтому они будут работать только напрямую с вашего провайдера — это делает ваш серфинг невидимым для проверок!"
+        )
+        success_text += premium_note
+    else:
+        success_text += "⚠️ Не передавайте ссылку третьим лицам!\nЕсли возникнут проблемы с подключением, напишите в поддержку по кнопке «Помощь 🆘» из главного меню."
 
     await message.answer_photo(
         photo=qr_file,
         caption=success_text,
         reply_markup=get_main_menu_keyboard(show_trial=False)
     )
+
+    if is_premium:
+        video_path = "marshrut.mp4"
+        if os.path.exists(video_path):
+            await message.answer_video(
+                video=FSInputFile(video_path),
+                caption="🎬 Видео-инструкция по настройке VIP-маршрутизации",
+                parse_mode="HTML"
+            )
+        else:
+            logger.error(f"Файл видео {video_path} не найден!")
 
 @router.callback_query(F.data == "profile")
 @router.message(Command("profile"))
@@ -193,33 +221,59 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
             
         links = marzban_data.get("links", [])
         vless_link = links[0] if links else ""
+
+        # Определяем, является ли пользователь VIP
+        is_premium = False
+        if hasattr(user, "tier") and getattr(user, "tier") == "premium":
+            is_premium = True
+        elif vless_link and "8445" in vless_link:
+            is_premium = True
         
         if subscription_url or vless_link:
             link_text = (
-                f"🔗 <b>Умная ссылка (Подписка):</b>\n"
+                f"🔗 <b>Ваша ссылка на подписку:</b>\n"
                 f"<code>{subscription_url}</code>\n"
-                f"<i>(Рекомендуется! Сама обновится при смене IP)</i>\n\n"
+                f"<i>(Нажмите на ссылку, чтобы скопировать)</i>\n\n"
                 f"🔑 <b>Прямая VLESS-ссылка:</b>\n"
                 f"<code>{vless_link}</code>\n\n"
-                f"📱 <b>Инструкция для iOS и Android:</b>\n"
-                f"1. Откройте приложение <b>Hiddify</b>\n"
-                f"2. Нажмите <b>«+»</b> в правом верхнем углу\n"
-                f"3. Выберите <b>«Сканировать QR-код»</b> и наведите камеру на код из этого сообщения\n\n"
-                f"💻 <b>Инструкция для Windows и Mac:</b>\n"
-                f"1. Откройте Hiddify\n"
-                f"2. Скопируйте Умную ссылку (нажатием на нее)\n"
-                f"3. Нажмите <b>«+»</b> > <b>«Добавить из буфера обмена»</b>\n\n"
-                f"⚠️ Не передавайте ссылку третьим лицам!"
+                f"📱 <b>Инструкция по подключению (V2Box):</b>\n"
+                f"1. Установите <b>V2Box</b> (<a href='https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690'>iOS</a> / <a href='https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box'>Android</a>)\n"
+                f"2. В приложении перейдите во вкладку <b>Configs</b>.\n"
+                f"3. Нажмите <b>«+»</b> → <b>«Import V2ray URL from Clipboard»</b>.\n"
+                f"4. На главной (Home) нажмите <b>«Slide to Connect»</b>.\n\n"
             )
+
+            if is_premium:
+                premium_note = (
+                    "🚀 <b>Настройка умной маршрутизации (VIP):</b>\n\n"
+                    "Мы специально не встраиваем обход блокировок в основной ключ, чтобы максимально скрыть работу VPN от систем РКН. "
+                    "Для корректной работы российских сервисов напрямую, а заблокированных через VPN, "
+                    "примените ключ маршрутизации:\n\n"
+                    "🔑 <b>Ключ маршрутизации:</b>\n"
+                    "<code>v2box://routes?multi=W3sibGlzdCI6WyJnZW9zaXRlOnJ1IiwiZG9tYWluOnJ1IiwiZG9tYWluOtGA0YQiXSwiaXNFbmFibGUiOnRydWUsIm1hdGNoTW9kZSI6ImRvbWFpbiIsIm5hbWUiOiJyb3V0ZS4zRjFENTdBOS0xRkZELTQ5MkMtOTY2NS1BRTJDNDU4QzE0QUIiLCJyZW1hcmsiOiJEaXJlY3QgUlUiLCJsaXN0SVAiOlsiZ2VvaXA6cnUiLCJnZW9pcDpwcml2YXRlIl0sInR5cGUiOiJJUCIsInRhZyI6ImRpcmVjdCJ9XQ==</code>\n\n"
+                    "👇 <b>Ниже мы отправили видео-инструкцию, как это сделать за 10 секунд.</b>"
+                )
+                link_text += premium_note
+            else:
+                link_text += "⚠️ Не передавайте ссылку третьим лицам!"
             
-            if vless_link:
-                qr_file = generate_qr(vless_link)
+            if vless_link or subscription_url:
+                qr_file = generate_qr(vless_link or subscription_url)
                 await callback.message.answer_photo(
                     photo=qr_file,
                     caption=link_text
                 )
             else:
                 await callback.message.answer(text=link_text)
+
+            if is_premium:
+                video_path = "marshrut.mp4"
+                if os.path.exists(video_path):
+                    await callback.message.answer_video(
+                        video=FSInputFile(video_path),
+                        caption="🎬 Видео-инструкция по настройке VIP-маршрутизации",
+                        parse_mode="HTML"
+                    )
                 
             logger.info(f"Пользователь {user_id} получил ссылку на подписку")
         else:
@@ -300,8 +354,11 @@ async def show_subscription(callback_or_message: types.CallbackQuery | types.Mes
                 base_url = settings.MARZBAN_URL.rstrip("/")
                 subscription_url = f"{base_url}{subscription_url}"
 
-            if subscription_url:
-                await send_subscription_info(message, subscription_url)
+            links = marzban_data.get("links", [])
+            vless_link = links[0] if links else ""
+
+            if subscription_url or vless_link:
+                await send_subscription_info(message, subscription_url, vless_link, user)
             else:
                 await message.answer(
                     "❌ Не удалось получить ссылку на подписку.\n\n"

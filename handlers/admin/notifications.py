@@ -5,8 +5,9 @@
 - Запрос на вывод средств
 """
 
+import os
 from aiogram import Bot
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, BufferedInputFile
 from typing import List, Dict, Optional
 
 from loguru import logger
@@ -180,9 +181,10 @@ async def notify_user_purchase(
     amount_rub: float,
     duration_days: int = 30,
     is_extension: bool = False,
-    marzban_username: Optional[str] = None
+    marzban_username: Optional[str] = None,
+    tier: str = "standard"
 ):
-    """Уведомление пользователю об успешной покупке/продлении VPN с отправкой ссылки и QR-кода"""
+    """Уведомление пользователю об успешной покупке/продлении VPN с инструкциями для V2Box"""
     action = "продлена" if is_extension else "оформлена"
     
     subscription_url = ""
@@ -193,7 +195,6 @@ async def notify_user_purchase(
             if marzban_data:
                 subscription_url = marzban_data.get("subscription_url", "")
                 if subscription_url and subscription_url.startswith("/"):
-                    from config import settings
                     base_url = settings.MARZBAN_URL.rstrip("/")
                     subscription_url = f"{base_url}{subscription_url}"
         except Exception as e:
@@ -204,7 +205,6 @@ async def notify_user_purchase(
         try:
             import qrcode
             import io
-            from aiogram.types import BufferedInputFile
             qr = qrcode.QRCode(version=1, box_size=10, border=5)
             qr.add_data(subscription_url)
             qr.make(fit=True)
@@ -216,46 +216,62 @@ async def notify_user_purchase(
         except Exception as e:
             logger.error(f"Ошибка генерации QR-кода для {user_id}: {e}")
     
-    if subscription_url and qr_file:
-        message = (
-            f"✅ <b>Оплата {amount_rub:.2f}₽ прошла успешно!</b>\n\n"
-            f"Ваша подписка на VPN {action}.\n"
-            f"⏳ Добавлено времени: <b>{duration_days} дней</b>\n\n"
-            f"🔗 <b>Ваша Умная ссылка:</b>\n"
-            f"<code>{subscription_url}</code>\n"
-            "<i>(Рекомендуется! Сама обновится при смене IP, скрыта от РКН)</i>\n\n"
-            "📱 <b>Инструкция для iOS и Android:</b>\n"
-            "1. Установите приложение <b>Hiddify</b> из магазина приложений.\n"
-            "2. Откройте приложение и нажмите <b>«+»</b> в правом верхнем углу.\n"
-            "3. Нажмите <b>«Добавить из буфера обмена»</b> — ссылка скопируется автоматически при нажатии на неё выше.\n"
-            "4. Нажмите огромную круглую кнопку для подключения.\n\n"
-            "💻 <b>Инструкция для Windows и Mac:</b>\n"
-            "1. Скачайте Hiddify и откройте его.\n"
-            "2. Нажмите на текст ссылки выше, чтобы скопировать её.\n"
-            "3. В приложении нажмите <b>«+»</b> → <b>«Добавить из буфера обмена»</b>.\n\n"
-            "📷 <b>Альтернативный способ (QR-код):</b>\n"
-            "Если вы активируете VPN на компьютере, можете отсканировать QR-код из этого сообщения через приложение на телефоне.\n\n"
-            "⚠️ Не передавайте ссылку третьим лицам!\n\n"
-            "Если возникнут проблемы с подключением, напишите в поддержку по кнопке «Помощь 🆘» из главного меню."
+    # Текст основной инструкции (общий для всех)
+    instruction_base = (
+        f"✅ <b>Оплата {amount_rub:.2f}₽ прошла успешно!</b>\n\n"
+        f"Ваша подписка на VPN {action}.\n"
+        f"⏳ Добавлено времени: <b>{duration_days} дней</b>\n\n"
+        f"🔗 <b>Ваша ссылка на подписку:</b>\n"
+        f"<code>{subscription_url}</code>\n"
+        "<i>(Нажмите на ссылку, чтобы скопировать)</i>\n\n"
+        "📱 <b>Инструкция по подключению (V2Box):</b>\n"
+        "1. Установите <b>V2Box</b> (<a href='https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690'>iOS</a> / <a href='https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box'>Android</a>)\n"
+        "2. В приложении перейдите во вкладку <b>Configs</b>.\n"
+        "3. Нажмите <b>«+»</b> → <b>«Import V2ray URL from Clipboard»</b>.\n"
+        "4. На главной (Home) нажмите <b>«Slide to Connect»</b>.\n\n"
+    )
+
+    if tier == "premium":
+        # Дополнение для VIP тарифа
+        premium_note = (
+            "🚀 <b>Настройка умной маршрутизации (VIP):</b>\n\n"
+            "Мы специально не встраиваем обход блокировок в основной ключ, чтобы максимально скрыть работу VPN от систем РКН. "
+            "Для корректной работы российских сервисов (Госуслуги, банки) напрямую, а заблокированных (Instagram, X) через VPN, "
+            "вам необходимо применить ключ маршрутизации:\n\n"
+            "🔑 <b>Ключ маршрутизации:</b>\n"
+            "<code>v2box://routes?multi=W3sibGlzdCI6WyJnZW9zaXRlOnJ1IiwiZG9tYWluOnJ1IiwiZG9tYWluOtGA0YQiXSwiaXNFbmFibGUiOnRydWUsIm1hdGNoTW9kZSI6ImRvbWFpbiIsIm5hbWUiOiJyb3V0ZS4zRjFENTdBOS0xRkZELTQ5MkMtOTY2NS1BRTJDNDU4QzE0QUIiLCJyZW1hcmsiOiJEaXJlY3QgUlUiLCJsaXN0SVAiOlsiZ2VvaXA6cnUiLCJnZW9pcDpwcml2YXRlIl0sInR5cGUiOiJJUCIsInRhZyI6ImRpcmVjdCJ9XQ==</code>\n\n"
+            "👇 <b>Ниже мы отправили видео-инструкцию, как это сделать за 10 секунд.</b>\n"
+            "На уровне нашего сервера для вас включен жесткий БЛОК на посещение РУ-сервисов через VPN, "
+            "поэтому они будут работать только напрямую с вашего провайдера — это делает ваш серфинг невидимым для проверок!"
         )
+        final_message = instruction_base + premium_note
     else:
-        message = (
-            f"✅ <b>Оплата {amount_rub:.2f}₽ прошла успешно!</b>\n\n"
-            f"Ваша подписка на VPN {action}.\n"
-            f"⏳ Добавлено времени: <b>{duration_days} дней</b>\n\n"
-            f"Приятного пользования Nemo VPN! 🌊\n\n"
-            "Для получения ссылки на подписку нажмите кнопку «Подписка» в профиле."
-        )
-    
+        final_message = instruction_base + "Приятного пользования Nemo VPN! 🌊"
+
     try:
+        # 1. Отправляем основное сообщение (фото QR + текст)
         if subscription_url and qr_file:
             await bot.send_photo(
                 user_id,
                 photo=qr_file,
-                caption=message,
+                caption=final_message,
                 parse_mode="HTML"
             )
         else:
-            await bot.send_message(user_id, message, parse_mode="HTML")
+            await bot.send_message(user_id, final_message, parse_mode="HTML")
+        
+        # 2. Для VIP тарифа отправляем видео-инструкцию
+        if tier == "premium":
+            video_path = "marshrut.mp4"
+            if os.path.exists(video_path):
+                await bot.send_video(
+                    user_id,
+                    video=FSInputFile(video_path),
+                    caption="🎬 Видео-инструкция по настройке VIP-маршрутизации",
+                    parse_mode="HTML"
+                )
+            else:
+                logger.error(f"Файл видео {video_path} не найден!")
+
     except Exception as e:
         logger.warning(f"Failed to notify user {user_id}: {e}")

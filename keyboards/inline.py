@@ -106,7 +106,7 @@ def get_help_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Как настроить Hiddify 📱", callback_data="help_hiddify", style="primary")
+    builder.button(text="Как настроить V2Box 📱", callback_data="help_v2box", style="primary")
     builder.button(text="Частые вопросы ❓", callback_data="help_faq", style="primary")
     builder.button(text="Реферальная программа 👥", callback_data="referral", style="primary")
     builder.button(text="Техподдержка 💬", callback_data="help_support", style="primary")
@@ -118,18 +118,17 @@ def get_help_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_hiddify_instruction_keyboard() -> InlineKeyboardMarkup:
+def get_v2box_instruction_keyboard() -> InlineKeyboardMarkup:
     """
-    Клавиатура с инструкцией по настройке Hiddify.
+    Клавиатура с инструкцией по настройке V2Box.
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="Скачать для Android 📱", url="https://play.google.com/store/apps/details?id=app.hiddify.com", style="primary")
-    builder.button(text="Скачать для iOS 🍎", url="https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532", style="primary")
-    builder.button(text="Скачать для Windows 💻", url="https://github.com/hiddify/hiddify-next/releases", style="primary")
+    builder.button(text="Скачать для iOS 🍎", url="https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690", style="primary")
+    builder.button(text="Скачать для Android 📱", url="https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box", style="primary")
     builder.button(text="Назад ↩️", callback_data="help", style="danger")
     
-    builder.adjust(1, 1)
+    builder.adjust(1, 1, 1)
     return builder.as_markup()
 
 
