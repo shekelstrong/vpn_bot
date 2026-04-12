@@ -13,11 +13,17 @@ from database.engine import Base
 
 class User(Base):
     """
-    Модель пользователя Telegram.
+    Модель пользователя Telegram / VK.
     """
     __tablename__ = "users"
 
+    # Главный ID (для TG это TG ID, для VK это 2 триллиона + VK ID)
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    
+    # НОВЫЕ ПОЛЯ (Безопасны для текущего функционала)
+    vk_id: Mapped[Optional[int]] = mapped_column(BigInteger, unique=True, nullable=True)
+    platform: Mapped[str] = mapped_column(String(10), default="tg")
+
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     marzban_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
     is_trial_used: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -27,7 +33,6 @@ class User(Base):
     expire_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_notified_step: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
-    # НОВОЕ ПОЛЕ: Уровень тарифа пользователя (standard или premium)
     tier: Mapped[str] = mapped_column(String(50), default="standard")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -57,7 +62,7 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User(user_id={self.user_id}, username={self.username}, tier={self.tier})>"
+        return f"<User(user_id={self.user_id}, platform={self.platform}, username={self.username}, tier={self.tier})>"
 
 
 class Transaction(Base):
