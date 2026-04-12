@@ -196,7 +196,7 @@ async def notify_user_purchase(
     marzban_username: Optional[str] = None,
     tier: str = "standard"
 ):
-    """Уведомление пользователю об успешной покупке/продлении VPN с инструкциями для V2Box"""
+    """Уведомление пользователю об успешной покупке/продлении VPN с инструкциями"""
     action = "продлена" if is_extension else "оформлена"
     
     subscription_url = ""
@@ -227,11 +227,14 @@ async def notify_user_purchase(
         )
         
     instruction_base += (
-        "📱 <b>Инструкция по подключению (V2Box):</b>\n"
-        "1. Установите <b>V2Box</b> (<a href='https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690'>iOS</a> / <a href='https://play.google.com/store/apps/details?id=dev.hexasoftware.v2box'>Android</a>)\n"
-        "2. В приложении перейдите во вкладку <b>Configs</b>.\n"
-        "3. Нажмите <b>«+»</b> → <b>«Import V2ray URL from Clipboard»</b>.\n"
-        "4. На главной (Home) нажмите <b>«Slide to Connect»</b>.\n\n"
+        "📱 <b>Инструкция по подключению:</b>\n"
+        "1. Установите приложение для вашего устройства:\n"
+        "• <b>iOS / macOS:</b> <a href='https://apps.apple.com/us/app/v2box-v2ray-client/id6446814690'>V2Box (Рекомендуем)</a> или <a href='https://apps.apple.com/us/app/happ-proxy-utility/id6504287215'>Happ</a>\n"
+        "• <b>Android:</b> <a href='https://play.google.com/store/apps/details?id=com.happproxy'>Happ</a>\n"
+        "• <b>Windows:</b> <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe'>Happ</a>\n"
+        "2. Скопируйте ссылку на подписку (выше).\n"
+        "3. Откройте приложение, нажмите <b>«+»</b> и выберите <b>«Import from Clipboard»</b>.\n"
+        "4. Нажмите кнопку подключения на главном экране.\n\n"
     )
 
     if tier == "premium":
@@ -239,11 +242,14 @@ async def notify_user_purchase(
         premium_note = (
             "🚀 <b>Настройка умной маршрутизации (VIP):</b>\n\n"
             "Мы специально не встраиваем обход блокировок в основной ключ, чтобы максимально скрыть работу VPN от систем РКН. "
-            "Для корректной работы российских сервисов (Госуслуги, банки) напрямую, а заблокированных (Instagram, X) через VPN, "
-            "вам необходимо применить ключ маршрутизации:\n\n"
-            "🔑 <b>Ключ маршрутизации:</b>\n"
-            "<code>v2box://routes?multi=W3sibGlzdCI6WyJnZW9zaXRlOnJ1IiwiZG9tYWluOnJ1IiwiZG9tYWluOtGA0YQiXSwiaXNFbmFibGUiOnRydWUsIm1hdGNoTW9kZSI6ImRvbWFpbiIsIm5hbWUiOiJyb3V0ZS4zRjFENTdBOS0xRkZELTQ5MkMtOTY2NS1BRTJDNDU4QzE0QUIiLCJyZW1hcmsiOiJEaXJlY3QgUlUiLCJsaXN0SVAiOlsiZ2VvaXA6cnUiLCJnZW9pcDpwcml2YXRlIl0sInR5cGUiOiJJUCIsInRhZyI6ImRpcmVjdCJ9XQ==</code>\n\n"
-            "📽 <a href='https://t.me/nemo_vpn_official/51'><b>Посмотреть видео-инструкцию (10 секунд)</b></a>\n"
+            "Для корректной работы российских сервисов напрямую, а заблокированных через VPN, "
+            "примените ключ маршрутизации для вашего приложения:\n\n"
+            "🔑 <b>Для V2Box (Apple):</b>\n"
+            "<code>v2box://routes?multi=W3sibGlzdCI6WyJnZW9zaXRlOnJ1IiwiZG9tYWluOnJ1IiwiZG9tYWluOtGA0YQiXSwiaXNFbmFibGUiOnRydWUsIm1hdGNoTW9kZSI6ImRvbWFpbiIsIm5hbWUiOiJyb3V0ZS4zRjFENTdBOS0xRkZELTQ5MkMtOTY2NS1BRTJDNDU4QzE0QUIiLCJyZW1hcmsiOiJEaXJlY3QgUlUiLCJsaXN0SVAiOlsiZ2VvaXA6cnUiLCJnZW9pcDpwcml2YXRlIl0sInR5cGUiOiJJUCIsInRhZyI6ImRpcmVjdCJ9XQ==</code>\n"
+            "📽 <a href='https://t.me/nemo_vpn_official/51'><b>Видео-инструкция для V2Box</b></a>\n\n"
+            "🔑 <b>Для Happ (Android / Windows / Apple):</b>\n"
+            "<code>happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0=</code>\n"
+            "📽 <a href='https://t.me/nemo_vpn_official/56'><b>Видео-инструкция для Happ</b></a>\n\n"
             "На уровне нашего сервера для вас включен жесткий БЛОК на посещение РУ-сервисов через VPN, "
             "поэтому они будут работать только напрямую с вашего провайдера — это делает ваш серфинг невидимым для проверок!"
         )
