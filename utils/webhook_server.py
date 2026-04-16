@@ -14,17 +14,18 @@ from database.engine import get_session_factory, init_db
 from database.models import User, PaymentInvoice
 from config import settings
 
-# Импорты обработчиков (предполагается, что они используют функцию обновления)
+# Импорты сервисов
 from services.crypto_webhook import handle_crypto_webhook_update
 from services.platega_webhook import handle_platega_webhook_update
 from services.marzban_api import marzban_service
+from services.payment_crypto import crypto_bot_service
 
 
 @web.middleware
 async def cors_middleware(request: web.Request, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]) -> web.StreamResponse:
     """
     Middleware для обработки CORS (Cross-Origin Resource Sharing).
-    Необходимо, чтобы Mini App на Vercel/Netlify мог делать запросы к нашему серверу.
+    Необходимо, чтобы Mini App на Vercel мог делать запросы к нашему серверу.
     """
     is_options = request.method == 'OPTIONS'
     
@@ -35,10 +36,13 @@ async def cors_middleware(request: web.Request, handler: Callable[[web.Request],
             response = await handler(request)
         except web.HTTPException as ex:
             response = ex
+        except Exception as e:
+            logger.error(f"CORS Middleware Error: {e}")
+            response = web.json_response({"error": "server_error"}, status=500)
             
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
     
     return response
 
@@ -50,7 +54,7 @@ class WebhookHandler:
         self.bot = bot
 
     # ==========================================
-    # СТАРЫЕ РОУТЫ ВЕБХУКОВ (НЕ ТРОГАЕМ ЛОГИКУ)
+    # СТАРЫЕ РОУТЫ ВЕБХУКОВ (ЛОГИКА СОХРАНЕНА)
     # ==========================================
     
     async def handle_crypto_webhook(self, request: web.Request) -> web.Response:
@@ -85,7 +89,7 @@ class WebhookHandler:
     # ==========================================
 
     async def api_get_user(self, request: web.Request) -> web.Response:
-        """Получить данные пользователя для отображения в Mini App."""
+        """Получить расширенные данные пользователя для отображения в профиле Mini App."""
         try:
             tg_id_str = request.query.get("tg_id")
             if not tg_id_str:
@@ -100,22 +104,43 @@ class WebhookHandler:
                 if not user:
                     return web.json_response({"error": "user not found"}, status=404)
                 
+                # Данные о трафике из Marzban
+                used_traffic_gb = 0.0
+                if user.marzban_username:
+                    try:
+                        mz_data = await marzban_service.get_user(user.marzban_username)
+                        if mz_data:
+                            # Переводим байты в ГБ
+                            used_traffic_gb = round(mz_data.get('used_traffic', 0) / (1024**3), 2)
+                    except Exception as e:
+                        logger.warning(f"Could not fetch traffic for {user.marzban_username}: {e}")
+
                 # Считаем оставшиеся дни
                 days_left = 0
                 if user.expire_date and user.expire_date > datetime.utcnow():
                     delta = user.expire_date - datetime.utcnow()
                     days_left = delta.days
 
+                # Формируем реферальную ссылку бота
+                bot_info = await self.bot.get_me()
+                ref_link = f"https://t.me/{bot_info.username}?start={user.user_id}"
+
                 return web.json_response({
-                    "user_id": user.user_id,
-                    "tier": user.tier,
-                    "days_left": days_left,
-                    "device_count": user.device_count,
-                    "gb_limit": user.gb_limit, # None значит безлимит (для старых)
-                    "task_channel_sub": user.task_channel_sub,
-                    "refs_paid_count": user.refs_paid_count,
-                    "balance": user.balance,
-                    "referral_balance": user.referral_balance
+                    "status": "success",
+                    "user": {
+                        "user_id": user.user_id,
+                        "username": user.username or "Пользователь",
+                        "tier": user.tier,
+                        "days_left": days_left,
+                        "device_count": user.device_count,
+                        "gb_limit": user.gb_limit or 0,
+                        "used_traffic": used_traffic_gb,
+                        "task_channel_sub": user.task_channel_sub,
+                        "refs_paid_count": user.refs_paid_count,
+                        "ref_link": ref_link,
+                        "balance": user.balance,
+                        "referral_balance": user.referral_balance
+                    }
                 })
         except Exception as e:
             logger.error(f"API Get User Error: {e}")
@@ -126,8 +151,6 @@ class WebhookHandler:
         try:
             data = await request.json()
             tg_id = int(data.get("tg_id"))
-            
-            # ID или username канала из ТЗ
             channel_id = "@nemo_vpn_official" 
             
             async with get_session_factory()() as session:
@@ -138,7 +161,7 @@ class WebhookHandler:
                     return web.json_response({"error": "user not found"}, status=404)
                     
                 if user.task_channel_sub:
-                    return web.json_response({"status": "already_done", "message": "Задание уже выполнено"})
+                    return web.json_response({"status": "already_done"})
 
                 # Проверяем подписку через бота
                 try:
@@ -149,7 +172,6 @@ class WebhookHandler:
                     is_member = False
 
                 if is_member:
-                    # Даем бонус +3 дня
                     bonus_days = 3
                     now = datetime.utcnow()
                     if user.expire_date and user.expire_date > now:
@@ -159,7 +181,6 @@ class WebhookHandler:
                         
                     user.task_channel_sub = True
                     
-                    # Продлеваем в Marzban
                     if user.marzban_username:
                         try:
                             await marzban_service.update_user_expiry(
@@ -167,24 +188,21 @@ class WebhookHandler:
                                 extra_days=bonus_days,
                                 tier=user.tier
                             )
-                        except Exception as e:
-                            logger.error(f"Ошибка начисления +3 дней в Marzban: {e}")
+                        except: pass
 
                     await session.commit()
                     
-                    # Отправляем уведомление
                     try:
                         await self.bot.send_message(
                             tg_id,
-                            "🎉 <b>Спасибо за подписку!</b>\n\nВам начислено <b>+3 бонусных дня</b> использования VPN.",
+                            "🎉 <b>Бонус начислен!</b>\n\nВы получили +3 дня за подписку на канал.",
                             parse_mode="HTML"
                         )
-                    except:
-                        pass
+                    except: pass
                         
-                    return web.json_response({"status": "success", "bonus_days": bonus_days})
+                    return web.json_response({"status": "success"})
                 else:
-                    return web.json_response({"status": "not_subscribed", "message": "Вы еще не подписаны на канал"})
+                    return web.json_response({"status": "not_subscribed"})
 
         except Exception as e:
             logger.error(f"API Check Task Error: {e}")
@@ -192,36 +210,54 @@ class WebhookHandler:
 
     async def api_create_invoice(self, request: web.Request) -> web.Response:
         """
-        Создание инвойса (предварительного счета) из Mini App.
-        Фронтенд передает: tg_id, days, tier, device_count, amount, payment_method
+        Создание реальной ссылки на оплату через CryptoBot или Platega.
         """
         try:
             data = await request.json()
             tg_id = int(data.get("tg_id"))
             days = int(data.get("days", 30))
-            tier = data.get("tier", "premium") # premium - обход белых списков
-            device_count = int(data.get("device_count", 1))
             amount = float(data.get("amount", 300))
-            payment_method = data.get("payment_method", "cryptopay") # cryptopay или platega
+            payment_method = data.get("payment_method", "cryptopay")
+            device_count = int(data.get("device_count", 1))
             
-            # Здесь можно реализовать логику вызова API CryptoPay/Platega для получения ссылки,
-            # но пока мы просто создаем инвойс в нашей БД.
-            # Для генерации уникального ID:
             import uuid
-            invoice_uid = f"{payment_method}_{tg_id}_{uuid.uuid4().hex[:8]}"
+            order_id = f"app_{payment_method}_{uuid.uuid4().hex[:6]}"
+            pay_url = None
 
+            # Логика получения реальной ссылки от мерчанта
+            if payment_method == "cryptopay":
+                price_usdt = round(amount / settings.USDT_TO_RUB_RATE, 2)
+                res = await crypto_bot_service.create_invoice(
+                    amount_usdt=price_usdt,
+                    order_id=order_id,
+                    description=f"VIP VPN: {days} дн. ({device_count} устр.)"
+                )
+                if res: pay_url = res[0]
+            
+            elif payment_method == "platega":
+                from services.payment_platega import create_invoice as create_sbp_link
+                pay_url = await create_sbp_link(
+                    amount_rub=int(amount),
+                    order_id=order_id,
+                    user_id=tg_id,
+                    description=f"VIP VPN: {days} дн. ({device_count} устр.)"
+                )
+
+            if not pay_url:
+                return web.json_response({"error": "Could not generate payment link"}, status=500)
+
+            # Сохраняем инвойс в БД
             async with get_session_factory()() as session:
                 invoice = PaymentInvoice(
                     user_id=tg_id,
-                    invoice_id=invoice_uid,
+                    invoice_id=order_id,
                     amount=amount,
                     currency="RUB",
                     payment_method=payment_method,
                     status="pending",
-                    # В payload сохраняем все настройки, чтобы при оплате выдать правильные лимиты
                     payload=json.dumps({
                         "days": days, 
-                        "tier": tier, 
+                        "tier": "premium", 
                         "device_count": device_count
                     }),
                     created_at=datetime.utcnow()
@@ -231,9 +267,7 @@ class WebhookHandler:
 
             return web.json_response({
                 "status": "success", 
-                "invoice_id": invoice_uid,
-                "amount": amount,
-                "message": "Счет создан. Теперь бот должен сгенерировать ссылку."
+                "pay_url": pay_url
             })
             
         except Exception as e:
@@ -244,36 +278,27 @@ class WebhookHandler:
 async def run_webhooks(bot=None):
     """Функция запуска веб-сервера."""
     await init_db()
-    
     handler = WebhookHandler(bot=bot)
     
-    # Добавляем middleware для CORS (чтобы Mini App работал)
     app = web.Application(middlewares=[cors_middleware])
     
-    # Роуты вебхуков
     app.router.add_post('/cryptopay', handler.handle_crypto_webhook)
     app.router.add_post('/platega-webhook', handler.handle_platega_webhook)
     app.router.add_post('/webhook/platega', handler.handle_platega_webhook)
     
-    # Роуты возврата пользователя (чтобы не было 521/404)
     app.router.add_get('/pay_success', handler.handle_pay_success)
     app.router.add_get('/pay_failed', handler.handle_pay_failed)
     
     app.router.add_get('/health', handler.health_check)
 
-    # === НОВЫЕ РОУТЫ MINI APP ===
     app.router.add_get('/api/user', handler.api_get_user)
     app.router.add_post('/api/check_task', handler.api_check_task)
     app.router.add_post('/api/invoice', handler.api_create_invoice)
-    # ============================
 
     runner = web.AppRunner(app)
     await runner.setup()
     
-    # Порт по умолчанию 8080 (как было в ТЗ)
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
     
-    logger.info("=" * 50)
-    logger.info("Вебхук-сервер Nemo VPN запущен (Порт 8080) с поддержкой Mini App API!")
-    logger.info("=" * 50)
+    logger.info("🚀 Nemo VPN API & Webhooks started on port 8080")
