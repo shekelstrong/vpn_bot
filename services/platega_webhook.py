@@ -325,7 +325,8 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             vless_link = ""
             if user.marzban_username:
                 sub_url = await marzban_service.get_user_subscription(user.marzban_username)
-                vless_link = marzban_service.generate_vless_link(user.marzban_username, sub_url)
+                # ИСПРАВЛЕНИЕ: Берем РЕАЛЬНЫЙ VLESS ключ из Marzban, а не генерируем кривой
+                vless_link = await marzban_service.get_user_vless_link(user.marzban_username)
 
             msg = (
                 f"✅ <b>Оплата прошла успешно!</b>\n\n"

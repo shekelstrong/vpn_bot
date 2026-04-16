@@ -324,7 +324,21 @@ class MarzbanService:
         user = await self.get_user(marzban_username)
         if not user:
             return ""
-        return user.get("subscription_url", "")
+        
+        sub_url = user.get("subscription_url", "")
+        if sub_url and sub_url.startswith("/"):
+            # Склеиваем домен из конфига и путь подписки
+            base_url = settings.MARZBAN_URL.rstrip("/")
+            return f"{base_url}{sub_url}"
+        return sub_url
+
+    async def get_user_vless_link(self, marzban_username: str) -> str:
+        """Получить РЕАЛЬНЫЙ VLESS ключ из Marzban."""
+        user = await self.get_user(marzban_username)
+        if not user:
+            return ""
+        links = user.get("links", [])
+        return links[0] if links else ""
 
     async def close(self):
         """Закрыть HTTP клиент."""

@@ -117,7 +117,7 @@ class WebhookHandler:
                         
                         sub_url = await marzban_service.get_user_subscription(user.marzban_username)
                         if sub_url:
-                            vless_link = marzban_service.generate_vless_link(user.marzban_username, sub_url)
+                            vless_link = await marzban_service.get_user_vless_link(user.marzban_username)
                     except Exception as e: 
                         logger.error(f"Ошибка получения данных из Marzban для {user.marzban_username}: {e}")
 
@@ -329,6 +329,144 @@ class WebhookHandler:
             logger.error(traceback.format_exc())
             return web.json_response({"error": str(e)}, status=500)
 
+    async def api_pay_from_balance(self, request: web.Request) -> web.Response:
+        """Оплата подписки с внутреннего/реферального баланса."""
+        try:
+            data = await request.json()
+            tg_id_raw = data.get("tg_id")
+            
+            if not tg_id_raw:
+                return web.json_response({"error": "tg_id is required"}, status=400)
+                
+            tg_id = int(tg_id_raw)
+            days = int(data.get("days", 30))
+            tier = data.get("tier", "premium") 
+            device_count = int(data.get("device_count", 1))
+            amount = float(data.get("amount", 300))
+            
+            logger.info(f"💰 Запрос на оплату с баланса: {tg_id}, сумма {amount} руб.")
+
+            async with get_session_factory()() as session:
+                # Находим пользователя
+                result = await session.execute(select(User).where(User.user_id == tg_id))
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    return web.json_response({"error": "Пользователь не найден"}, status=404)
+                    
+                # Считаем общий баланс
+                total_balance = user.balance + user.referral_balance
+                
+                if total_balance < amount:
+                    return web.json_response({"error": f"Недостаточно средств. Ваш баланс: {total_balance} руб."}, status=400)
+                    
+                # Списываем средства (сначала с основного баланса, остаток с реферального)
+                remaining_amount = amount
+                if user.balance >= remaining_amount:
+                    user.balance -= remaining_amount
+                else:
+                    remaining_amount -= user.balance
+                    user.balance = 0.0
+                    user.referral_balance -= remaining_amount
+                
+                import uuid
+                payment_id = f"balance_{uuid.uuid4().hex[:8]}"
+
+                # Записываем транзакцию
+                from database.models import Transaction
+                transaction = Transaction(
+                    user_id=tg_id,
+                    amount=amount,
+                    currency="RUB",
+                    payment_method="balance",
+                    status="paid",
+                    payment_id=payment_id,
+                    description=f"Оплата с баланса на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'}) | Устройств: {device_count}"
+                )
+                session.add(transaction)
+                
+                # Продлеваем подписку в БД
+                now = datetime.utcnow()
+                if user.expire_date and user.expire_date > now:
+                    user.expire_date = user.expire_date + timedelta(days=days)
+                else:
+                    user.expire_date = now + timedelta(days=days)
+                    
+                user.tier = tier
+                user.device_count = device_count
+                
+                # Обновляем Marzban
+                try:
+                    if user.marzban_username:
+                        marzban_data = await marzban_service.get_user(user.marzban_username)
+                        if marzban_data:
+                            await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier)
+                            await marzban_service.update_user_ip_limit(user.marzban_username, device_count)
+                        else:
+                            new_acc = await marzban_service.create_user(tg_id, user.username, days, data_limit_gb=0.0, tier=tier, device_count=device_count)
+                            user.marzban_username = new_acc.get('username')
+                    else:
+                        new_acc = await marzban_service.create_user(tg_id, user.username, days, data_limit_gb=0.0, tier=tier, device_count=device_count)
+                        user.marzban_username = new_acc.get('username')
+                except Exception as e:
+                    logger.error(f"Ошибка Marzban при оплате с баланса: {e}")
+
+                await session.commit()
+                
+            # Уведомляем юзера в телеграм
+            try:
+                tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+                sub_url = ""
+                vless_link = ""
+                if user.marzban_username:
+                    sub_url = await marzban_service.get_user_subscription(user.marzban_username)
+                    vless_link = await marzban_service.get_user_vless_link(user.marzban_username)
+                
+                msg = (
+                    f"✅ <b>Оплата с баланса прошла успешно!</b>\n\n"
+                    f"💎 Тариф: <b>{tier_name}</b>\n"
+                    f"⏳ Подписка: <b>{days} дней</b>\n"
+                    f"📱 Доступно устройств: <b>{user.device_count}</b>\n"
+                    f"💰 Списано: <b>{amount:.2f} RUB</b>\n\n"
+                )
+                
+                if sub_url:
+                    msg += (
+                        f"🔑 <b>Ваш ключ доступа (Subscription URL):</b>\n<code>{sub_url}</code>\n\n"
+                        f"🔗 <b>Прямой VLESS ключ:</b>\n<code>{vless_link}</code>\n\n"
+                        f"Приятного пользования! 🎉"
+                    )
+                else:
+                    msg += "🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
+                    
+                await self.bot.send_message(tg_id, msg, parse_mode="HTML")
+            except Exception as e:
+                logger.warning(f"Не удалось отправить уведомление {tg_id}: {e}")
+                
+            # Уведомляем админов
+            try:
+                user_display = f" @{user.username}" if user.username else f"ID: {tg_id}"
+                admin_msg = (
+                    f"💰 <b>Покупка с внутреннего баланса!</b>\n\n"
+                    f"🆔 ID: <code>{tg_id}</code>\n"
+                    f"👤 Профиль: {user_display}\n"
+                    f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
+                    f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>\n"
+                    f"📱 Устройств: <b>{device_count}</b>"
+                )
+                for admin_id in settings.admin_ids_list:
+                    await self.bot.send_message(admin_id, admin_msg, parse_mode="HTML")
+            except Exception as e:
+                logger.error(f"Ошибка уведомления админов: {e}")
+
+            return web.json_response({"status": "success", "message": "Оплата прошла успешно"})
+            
+        except Exception as e:
+            logger.error(f"API Pay From Balance Error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return web.json_response({"error": str(e)}, status=500)
+
 
 async def run_webhooks(bot=None):
     """Функция запуска веб-сервера."""
@@ -354,6 +492,7 @@ async def run_webhooks(bot=None):
     app.router.add_get('/api/user', handler.api_get_user)
     app.router.add_post('/api/check_task', handler.api_check_task)
     app.router.add_post('/api/invoice', handler.api_create_invoice)
+    app.router.add_post('/api/pay_balance', handler.api_pay_from_balance)
     # ============================
 
     runner = web.AppRunner(app)

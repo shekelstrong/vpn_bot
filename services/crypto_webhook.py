@@ -96,19 +96,21 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
             logger.error(f"User not found: {user_telegram_id}")
             return False
 
-        # Получаем days и tier из payload инвойса
+        # Получаем days, tier и device_count из payload инвойса
         days = 30
         tier = "standard"
+        device_count = 1
 
         if invoice.payload:
             try:
                 payload_data = json.loads(invoice.payload)
                 days = payload_data.get("days", 30)
                 tier = payload_data.get("tier", "standard")
+                device_count = payload_data.get("device_count", 1)
             except Exception as e:
                 logger.warning(f"Failed to parse invoice payload: {e}")
 
-        logger.info(f"Crypto Payment: user={user_telegram_id}, days={days}, tier={tier}, amount={amount}")
+        logger.info(f"Crypto Payment: user={user_telegram_id}, days={days}, tier={tier}, devices={device_count}, amount={amount}")
 
         # Проверяем, есть ли уже оплаченный инвойс
         if invoice.status == "paid":
@@ -117,6 +119,7 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
 
         # Обновляем инвойс
         invoice.status = "paid"
+        invoice.device_count = device_count
 
         # === НОВОЕ: Проверяем, первая ли это оплата (до добавления транзакции) ===
         prev_paid_tx = await session.execute(
@@ -136,7 +139,7 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
             payment_method="cryptopay",
             status="paid",
             payment_id=str(order_id),
-            description=f"Оплата подписки на {days} дней (Crypto)"
+            description=f"Оплата подписки на {days} дней (Crypto) | Устройств: {device_count}"
         )
         session.add(transaction)
 
@@ -151,8 +154,9 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
             user.expire_date = now + timedelta(days=days)
             logger.info(f"Новая подписка до {user.expire_date}")
 
-        # НОВОЕ: Обновляем тариф пользователя в базе данных
+        # Обновляем тариф и количество устройств пользователя в базе данных
         user.tier = tier
+        user.device_count = device_count
 
         # === MARZBAN ===
         try:
@@ -172,7 +176,8 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
                         username=user.username,
                         expire_days=days,
                         data_limit_gb=0.0,
-                        tier=tier
+                        tier=tier,
+                        device_count=device_count
                     )
                     user.marzban_username = new_user.get("username")
                     logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
@@ -182,10 +187,15 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
                     username=user.username,
                     expire_days=days,
                     data_limit_gb=0.0,
-                    tier=tier
+                    tier=tier,
+                    device_count=device_count
                 )
                 user.marzban_username = new_user.get("username")
                 logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
+                
+            # Принудительно синхронизируем лимит устройств с Marzban
+            await marzban_service.update_user_ip_limit(user.marzban_username, device_count)
+            
         except Exception as e:
             logger.error(f"❌ Marzban error: {e}")
 
@@ -272,23 +282,46 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
         # Фиксируем изменения
         await session.commit()
 
-        # === УВЕДОМЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ===
+        # === УВЕДОМЛЕНИЕ ПОЛЬЗОВАТЕЛЯ (ПРЯМАЯ ВЫДАЧА КЛЮЧЕЙ) ===
         try:
-            subscription_info = ""
-            if user.marzban_username:
-                subscription_info = f"\n\n🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
             tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+            
+            sub_url = ""
+            vless_link = ""
+            if user.marzban_username:
+                sub_url = await marzban_service.get_user_subscription(user.marzban_username)
+                vless_link = await marzban_service.get_user_vless_link(user.marzban_username)
 
-            await bot.send_message(
-                user_telegram_id,
+            msg = (
                 f"✅ <b>Оплата криптовалютой прошла успешно!</b>\n\n"
                 f"💎 Тариф: <b>{tier_name}</b>\n"
                 f"⏳ Подписка: <b>{days} дней</b>\n"
-                f"💰 Сумма: <b>{amount:.2f} RUB</b> (в эквиваленте)\n"
-                f"{subscription_info}\n"
-                f"Спасибо за покупку! 🎉",
+                f"📱 Доступно устройств: <b>{user.device_count}</b>\n"
+                f"💰 Сумма: <b>{amount:.2f} RUB</b> (в эквиваленте)\n\n"
+            )
+
+            if sub_url:
+                msg += (
+                    f"🔑 <b>Ваш ключ доступа (Subscription URL):</b>\n"
+                    f"<code>{sub_url}</code>\n\n"
+                    f"🔗 <b>Прямой VLESS ключ:</b>\n"
+                    f"<code>{vless_link}</code>\n\n"
+                    f"📖 <b>Инструкция по подключению:</b>\n"
+                    f"1. Нажмите на ключ доступа выше, чтобы скопировать его.\n"
+                    f"2. Откройте приложение V2Box (iOS), v2rayNG (Android) или Hiddify (ПК).\n"
+                    f"3. Добавьте подписку из буфера обмена (через плюсик ➕) и обновите её.\n"
+                    f"4. Выберите нужный сервер и нажмите старт!\n\n"
+                    f"Приятного пользования! 🎉"
+                )
+            else:
+                msg += "🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
+
+            await bot.send_message(
+                user_telegram_id,
+                msg,
                 parse_mode="HTML"
             )
+            logger.info(f"✅ Пользователь {user_telegram_id} уведомлен об успехе крипто-платежа и получил ключи")
         except Exception as e:
             logger.error(f"Failed to notify user {user_telegram_id}: {e}")
 
@@ -306,7 +339,8 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
                 f"🆔 ID: <code>{user_telegram_id}</code>\n"
                 f"👤 Профиль: {user_display}\n"
                 f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
-                f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>"
+                f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>\n"
+                f"📱 Устройств: <b>{user.device_count}</b>"
                 f"{referrer_line}"
             )
 
