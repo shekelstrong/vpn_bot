@@ -145,13 +145,15 @@ class WebhookHandler:
 
                 tg_user_id = payment_invoice.user_id
                 days = 30
-                tier = "standard"  # НОВОЕ: По умолчанию обычный тариф
+                tier = "standard"  # По умолчанию обычный тариф
+                device_count = 1   # НОВОЕ: Устройства
 
                 if payment_invoice.payload:
                     try:
                         payload = json.loads(payment_invoice.payload)
                         days = payload.get("days", 30)
-                        tier = payload.get("tier", "standard")  # Извлекаем тариф
+                        tier = payload.get("tier", "standard")
+                        device_count = payload.get("device_count", 1)  # Извлекаем устройства
                     except:
                         pass
 
@@ -162,7 +164,8 @@ class WebhookHandler:
                     payment_method='cryptobot',
                     payment_id=str(invoice_id),
                     days=days,
-                    tier=tier  # Передаем тариф в обработчик
+                    tier=tier,  
+                    device_count=device_count  # Передаем лимит устройств
                 )
 
                 return web.json_response({"status": "ok"})
@@ -220,7 +223,8 @@ class WebhookHandler:
         payment_method: str,
         payment_id: str,
         days: int = 30,
-        tier: str = "standard"  # НОВОЕ: Добавлен параметр тарифа
+        tier: str = "standard",
+        device_count: int = 1  # НОВОЕ: Добавлен лимит устройств
     ):
         """Обработка успешного платежа и распределение реферальных бонусов."""
         from aiogram import Bot
@@ -251,7 +255,7 @@ class WebhookHandler:
                     payment_method=payment_method,
                     status="paid",
                     payment_id=payment_id,
-                    description=f"Оплата подписки на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'})",
+                    description=f"Оплата подписки на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'}) | Устройств: {device_count}",
                 )
                 session.add(transaction)
 
@@ -262,8 +266,9 @@ class WebhookHandler:
                 else:
                     user.expire_date = now + timedelta(days=days)
 
-                # НОВОЕ: Сохраняем тариф пользователю
+                # НОВОЕ: Сохраняем тариф и лимит устройств пользователю
                 user.tier = tier
+                user.device_count = device_count
 
                 # 5. РЕФЕРАЛЬНАЯ ЛОГИКА (3 уровня)
                 referrers_bonuses = []
@@ -317,29 +322,58 @@ class WebhookHandler:
                         username=user.username,
                         expire_days=days,
                         data_limit_gb=0.0,
-                        tier=tier
+                        tier=tier,
+                        device_count=device_count
                     )
                     user.marzban_username = new_acc.get('username')
+                
+                # НОВОЕ: Синхронизируем лимиты устройств с Marzban
+                if user.marzban_username:
+                    try:
+                        await marzban_service.update_user_ip_limit(user.marzban_username, device_count)
+                    except Exception as e:
+                        logger.error(f"Ошибка при обновлении лимита устройств в Marzban: {e}")
 
                 await session.commit()
                 logger.info(f"Payment processed and bonuses distributed for user {tg_user_id} (Тариф: {tier})")
 
                 # 7. Финальные уведомления (Юзеру и Админу)
                 try:
-                    subscription_info = ""
-                    if user.marzban_username:
-                        subscription_info = f"\n\n🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
-
                     tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+                    
+                    sub_url = ""
+                    vless_link = ""
+                    if user.marzban_username:
+                        sub_url = await marzban_service.get_user_subscription(user.marzban_username)
+                        vless_link = marzban_service.generate_vless_link(user.marzban_username, sub_url)
 
-                    await bot.send_message(
-                        tg_user_id,
+                    msg = (
                         f"✅ <b>Оплата прошла успешно!</b>\n\n"
                         f"💎 Тариф: <b>{tier_name}</b>\n"
                         f"⏳ Подписка: <b>{days} дней</b>\n"
-                        f"💰 Сумма: <b>{amount:.2f} {currency}</b>\n"
-                        f"{subscription_info}\n"
-                        f"Спасибо за покупку! 🎉",
+                        f"📱 Доступно устройств: <b>{user.device_count}</b>\n"
+                        f"💰 Сумма: <b>{amount:.2f} {currency}</b>\n\n"
+                    )
+
+                    if sub_url:
+                        msg += (
+                            f"🔑 <b>Ваш ключ доступа (Subscription URL):</b>\n"
+                            f"<code>{sub_url}</code>\n\n"
+                            f"🔗 <b>Прямой VLESS ключ:</b>\n"
+                            f"<code>{vless_link}</code>\n\n"
+                            f"📖 <b>Инструкция по подключению:</b>\n"
+                            f"1. Нажмите на ключ доступа выше, чтобы скопировать его.\n"
+                            f"2. Откройте приложение V2Box (iOS), v2rayNG (Android) или Hiddify (ПК).\n"
+                            f"3. Добавьте подписку из буфера обмена (через плюсик ➕) и обновите её.\n"
+                            f"4. Выберите нужный сервер и нажмите старт!\n\n"
+                            f"Приятного пользования! 🎉"
+                        )
+                    else:
+                        msg += "🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
+
+                    await bot.send_message(
+                        tg_user_id,
+                        msg,
                         parse_mode="HTML"
                     )
                     logger.info(f"Уведомление об успешной покупке доставлено пользователю {tg_user_id}")
@@ -351,7 +385,7 @@ class WebhookHandler:
                     user_id=tg_user_id,
                     amount_rub=amount,
                     username=user.username,
-                    method=payment_method,
+                    method=f"{payment_method} | Устройств: {device_count}", # Пробрасываем устройства админу
                     referrers_bonuses=referrers_bonuses if referrers_bonuses else None
                 )
 

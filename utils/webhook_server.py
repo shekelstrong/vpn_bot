@@ -108,14 +108,23 @@ class WebhookHandler:
                 if not user:
                     return web.json_response({"error": "user not found"}, status=404)
                 
-                # Данные о трафике из Marzban
+                # Данные о трафике из Marzban и получение ключей (НОВОЕ)
                 used_traffic_gb = 0.0
+                sub_url = ""
+                vless_link = ""
+                
                 if user.marzban_username:
                     try:
                         mz_data = await marzban_service.get_user(user.marzban_username)
                         if mz_data:
                             used_traffic_gb = round(mz_data.get('used_traffic', 0) / (1024**3), 2)
-                    except: pass
+                        
+                        # Получаем URL подписки и VLESS ссылку
+                        sub_url = await marzban_service.get_user_subscription(user.marzban_username)
+                        if sub_url:
+                            vless_link = marzban_service.generate_vless_link(user.marzban_username, sub_url)
+                    except Exception as e: 
+                        logger.error(f"Ошибка получения данных из Marzban для {user.marzban_username}: {e}")
 
                 # Считаем оставшиеся дни
                 days_left = 0
@@ -142,7 +151,9 @@ class WebhookHandler:
                         "refs_paid_count": user.refs_paid_count,
                         "ref_link": ref_link,
                         "balance": user.balance,
-                        "referral_balance": user.referral_balance
+                        "referral_balance": user.referral_balance,
+                        "sub_url": sub_url,        # НОВОЕ: Передаем ключ маршрутизации
+                        "vless_link": vless_link   # НОВОЕ: Передаем VLESS ключ
                     }
                 })
         except Exception as e:
@@ -231,7 +242,7 @@ class WebhookHandler:
             amount = float(data.get("amount", 300))
             payment_method = data.get("payment_method", "cryptopay")
             
-            logger.info(f"💳 Создание счета для {tg_id} через {payment_method} на {amount} руб.")
+            logger.info(f"💳 Создание счета для {tg_id} через {payment_method} на {amount} руб. Устройств: {device_count}")
 
             import uuid
             invoice_uid = f"app_{payment_method}_{uuid.uuid4().hex[:6]}"
@@ -243,7 +254,7 @@ class WebhookHandler:
                 res = await crypto_bot_service.create_invoice(
                     amount_usdt=price_usdt,
                     order_id=invoice_uid,
-                    description=f"Nemo VIP: {days} дней"
+                    description=f"Nemo VIP: {days} дней ({device_count} устр.)"
                 )
                 if res: pay_url = res[0]
             
@@ -253,7 +264,7 @@ class WebhookHandler:
                     amount_rub=int(amount),
                     order_id=invoice_uid,
                     user_id=tg_id,
-                    description=f"Nemo VIP: {days} дней"
+                    description=f"Nemo VIP: {days} дней ({device_count} устр.)"
                 )
 
             if not pay_url:

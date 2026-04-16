@@ -123,6 +123,10 @@ class PaymentInvoice(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending")
     payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    # НОВОЕ: Количество устройств в этом инвойсе
+    device_count: Mapped[int] = mapped_column(Integer, default=1)
+    
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     def __repr__(self) -> str:

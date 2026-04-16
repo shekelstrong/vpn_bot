@@ -92,21 +92,23 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             logger.error(f"User not found: {user_telegram_id}")
             return False
 
-        # Находим инвойс для получения days и tier
+        # Находим инвойс для получения days, tier и device_count
         existing = await session.execute(
             select(PaymentInvoice).where(PaymentInvoice.invoice_id == str(order_id))
         )
         invoice = existing.scalar_one_or_none()
 
-        # Получаем days и tier из payload инвойса
+        # Получаем данные из payload инвойса
         days = 30  # По умолчанию
-        tier = "standard"  # НОВОЕ: по умолчанию обычный тариф
+        tier = "standard"  # По умолчанию обычный тариф
+        device_count = 1   # НОВОЕ: Лимит устройств по умолчанию
 
         if invoice and invoice.payload:
             try:
                 payload_data = json.loads(invoice.payload)
                 days = payload_data.get("days", 30)
                 tier = payload_data.get("tier", "standard")
+                device_count = payload_data.get("device_count", 1)  # НОВОЕ: Извлекаем устройства
             except Exception as e:
                 logger.warning(f"Failed to parse invoice payload: {e}")
         else:
@@ -124,10 +126,11 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                     payload_data = json.loads(recent_invoice.payload)
                     days = payload_data.get("days", 30)
                     tier = payload_data.get("tier", "standard")
+                    device_count = payload_data.get("device_count", 1)
                 except Exception as e:
                     logger.warning(f"Failed to parse recent invoice payload: {e}")
 
-        logger.info(f"Payment: user={user_telegram_id}, days={days}, tier={tier}, amount={amount}")
+        logger.info(f"Payment: user={user_telegram_id}, days={days}, tier={tier}, devices={device_count}, amount={amount}")
 
         # Проверяем, есть ли уже оплаченный инвойс
         if invoice and invoice.status == "paid":
@@ -137,6 +140,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
         # Обновляем или создаем инвойс
         if invoice:
             invoice.status = "paid"
+            invoice.device_count = device_count # Сохраняем в инвойс (наша новая колонка)
         else:
             invoice = PaymentInvoice(
                 user_id=user_telegram_id,
@@ -145,12 +149,13 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 currency="RUB",
                 payment_method="platega",
                 status="paid",
-                payload=json.dumps({"days": days, "tier": tier}),
+                payload=json.dumps({"days": days, "tier": tier, "device_count": device_count}),
+                device_count=device_count,
                 created_at=datetime.utcnow()
             )
             session.add(invoice)
 
-        # === НОВОЕ: Проверяем, первая ли это оплата (до добавления транзакции) ===
+        # Проверяем, первая ли это оплата (до добавления транзакции)
         prev_paid_tx = await session.execute(
             select(Transaction)
             .where(Transaction.user_id == user_telegram_id)
@@ -158,7 +163,6 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             .limit(1)
         )
         is_first_payment = prev_paid_tx.scalar_one_or_none() is None
-        # =========================================================================
 
         # Создаем транзакцию
         transaction = Transaction(
@@ -168,7 +172,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             payment_method="platega",
             status="paid",
             payment_id=str(order_id),
-            description=f"Оплата подписки на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'})"
+            description=f"Оплата подписки на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'}) | Устройств: {device_count}"
         )
         session.add(transaction)
 
@@ -183,8 +187,9 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             user.expire_date = now + timedelta(days=days)
             logger.info(f"Новая подписка до {user.expire_date}")
 
-        # НОВОЕ: Обновляем тариф пользователя в базе данных
+        # Обновляем тариф и количество устройств пользователя в базе данных
         user.tier = tier
+        user.device_count = device_count # НОВОЕ: Применяем лимит
 
         # === MARZBAN ===
         try:
@@ -205,7 +210,8 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                         username=user.username,
                         expire_days=days,
                         data_limit_gb=0.0,
-                        tier=tier  # Передаем тариф
+                        tier=tier,
+                        device_count=device_count
                     )
                     user.marzban_username = new_user.get("username")
                     logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
@@ -216,10 +222,15 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                     username=user.username,
                     expire_days=days,
                     data_limit_gb=0.0,
-                    tier=tier  # Передаем тариф
+                    tier=tier,
+                    device_count=device_count
                 )
                 user.marzban_username = new_user.get("username")
                 logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
+            
+            # НОВОЕ: Принудительно синхронизируем лимит устройств с Marzban
+            await marzban_service.update_user_ip_limit(user.marzban_username, device_count)
+            
         except Exception as e:
             logger.error(f"❌ Marzban error: {e}")
             # Не прерываем обработку, продолжаем с уведомлениями и сохранением в БД
@@ -245,7 +256,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 bonus = float(amount) * (pct / 100.0)
                 referrer.referral_balance += bonus
                 
-                # === НОВАЯ ЛОГИКА ДЛЯ ЗАДАНИЙ (Только для 1 уровня) ===
+                # Логика для заданий (Только для 1 уровня)
                 bonus_days_msg = ""
                 if level == 1 and is_first_payment:
                     referrer.refs_paid_count += 1
@@ -260,14 +271,12 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                         bonus_days = 30
                         
                     if bonus_days > 0:
-                        # Продлеваем подписку рефоводу
                         ref_now = datetime.utcnow()
                         if referrer.expire_date and referrer.expire_date > ref_now:
                             referrer.expire_date += timedelta(days=bonus_days)
                         else:
                             referrer.expire_date = ref_now + timedelta(days=bonus_days)
                             
-                        # Продлеваем в Marzban
                         if referrer.marzban_username:
                             try:
                                 await marzban_service.update_user_expiry(
@@ -279,7 +288,6 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                                 logger.error(f"Ошибка начисления бонусных дней в Marzban для {referrer.user_id}: {e}")
                                 
                         bonus_days_msg = f"\n🎁 <b>Бонус за {referrer.refs_paid_count}-го друга:</b> +{bonus_days} дней VPN!"
-                # ======================================================
 
                 referrers_bonuses.append({
                     'level': level,
@@ -306,27 +314,49 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
         except Exception as e:
             logger.error(f"Ошибка при начислении реферальных: {e}")
 
-        # Фиксируем все изменения в БД (выдача дней, бонусы, инвойс)
+        # Фиксируем все изменения в БД
         await session.commit()
 
-        # === УВЕДОМЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ===
+        # === УВЕДОМЛЕНИЕ ПОЛЬЗОВАТЕЛЯ (НОВОЕ: ПРЯМАЯ ВЫДАЧА КЛЮЧЕЙ) ===
         try:
-            subscription_info = ""
-            if user.marzban_username:
-                subscription_info = f"\n\n🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
             tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+            
+            sub_url = ""
+            vless_link = ""
+            if user.marzban_username:
+                sub_url = await marzban_service.get_user_subscription(user.marzban_username)
+                vless_link = marzban_service.generate_vless_link(user.marzban_username, sub_url)
 
-            await bot.send_message(
-                user_telegram_id,
+            msg = (
                 f"✅ <b>Оплата прошла успешно!</b>\n\n"
                 f"💎 Тариф: <b>{tier_name}</b>\n"
                 f"⏳ Подписка: <b>{days} дней</b>\n"
-                f"💰 Сумма: <b>{amount:.2f} {currency}</b>\n"
-                f"{subscription_info}\n"
-                f"Спасибо за покупку! 🎉",
+                f"📱 Доступно устройств: <b>{user.device_count}</b>\n"
+                f"💰 Сумма: <b>{amount:.2f} {currency}</b>\n\n"
+            )
+
+            if sub_url:
+                msg += (
+                    f"🔑 <b>Ваш ключ доступа (Subscription URL):</b>\n"
+                    f"<code>{sub_url}</code>\n\n"
+                    f"🔗 <b>Прямой VLESS ключ:</b>\n"
+                    f"<code>{vless_link}</code>\n\n"
+                    f"📖 <b>Инструкция по подключению:</b>\n"
+                    f"1. Нажмите на ключ доступа выше, чтобы скопировать его.\n"
+                    f"2. Откройте приложение V2Box (iOS), v2rayNG (Android) или Hiddify (ПК).\n"
+                    f"3. Добавьте подписку из буфера обмена (через плюсик ➕) и обновите её.\n"
+                    f"4. Выберите нужный сервер и нажмите старт!\n\n"
+                    f"Приятного пользования! 🎉"
+                )
+            else:
+                msg += "🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
+
+            await bot.send_message(
+                user_telegram_id,
+                msg,
                 parse_mode="HTML"
             )
-            logger.info(f"✅ Пользователь {user_telegram_id} уведомлен об успехе")
+            logger.info(f"✅ Пользователь {user_telegram_id} уведомлен об успехе и получил ключи")
         except Exception as e:
             logger.error(f"Failed to notify user {user_telegram_id}: {e}")
 
@@ -345,7 +375,8 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 f"🆔 ID: <code>{user_telegram_id}</code>\n"
                 f"👤 Профиль: {user_display}\n"
                 f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
-                f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>"
+                f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>\n"
+                f"📱 Устройств: <b>{user.device_count}</b>"
                 f"{referrer_line}"
             )
 
@@ -358,7 +389,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             logger.error(f"Ошибка при отправке уведомления админу: {e}")
 
         logger.info(
-            f"✅ Platega payment: User {user_telegram_id} +{days} days ({tier}) | "
+            f"✅ Platega payment: User {user_telegram_id} +{days} days ({tier}) limit {user.device_count} | "
             f"Amount: {amount} RUB | "
             f"Ref bonuses: {len(referrers_bonuses)} referrers"
         )
