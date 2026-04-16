@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy import text
 from typing import Optional
+from loguru import logger
 
 from config import settings
 
@@ -24,7 +25,7 @@ def get_engine() -> AsyncEngine:
         # Используем PostgreSQL из файла конфигурации (.env)
         engine = create_async_engine(
             settings.DATABASE_URL,
-            echo=False, # Отключаем спам SQL-запросов в логи
+            echo=False,
         )
     return engine
 
@@ -66,37 +67,27 @@ async def drop_tables():
 
 async def init_db():
     """Инициализировать базу данных: создать таблицы и применить миграции."""
+    logger.info("🛠 Инициализация структуры базы данных...")
     await create_tables()
     
-    # Безопасная миграция: добавляем колонки "на горячую", если их нет.
-    # Это гарантированно сохранит всех старых пользователей, их балансы и подписки.
+    # Прямое применение миграций через ALTER TABLE IF NOT EXISTS (поддерживается в PG 9.6+)
+    # Это гарантирует, что новые колонки появятся в базе без удаления старых данных.
     async with get_engine().begin() as conn:
-        try:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN tier VARCHAR(50) DEFAULT 'standard'"))
-        except Exception:
-            # Ошибка здесь означает, что колонка уже создана ранее. Игнорируем.
-            pass
-            
-        # === Миграции для Mini App ===
-        try:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN device_count INTEGER DEFAULT 1"))
-        except Exception:
-            pass
-            
-        try:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN gb_limit FLOAT"))
-        except Exception:
-            pass
-            
-        try:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN task_channel_sub BOOLEAN DEFAULT FALSE"))
-        except Exception:
-            pass
-            
-        try:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN refs_paid_count INTEGER DEFAULT 0"))
-        except Exception:
-            pass
+        migrations = [
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS tier VARCHAR(50) DEFAULT 'standard'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS device_count INTEGER DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS gb_limit FLOAT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS task_channel_sub BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS refs_paid_count INTEGER DEFAULT 0"
+        ]
+        
+        for sql in migrations:
+            try:
+                await conn.execute(text(sql))
+            except Exception as e:
+                logger.error(f"⚠️ Ошибка при выполнении миграции ({sql}): {e}")
+
+    logger.info("✅ Миграции базы данных завершены")
 
 async def close_db():
     """Закрыть соединения с базой данных."""
