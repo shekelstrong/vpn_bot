@@ -24,7 +24,11 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import Message, BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeChat, MenuButtonCommands
+from aiogram.types import (
+    Message, BotCommand, BotCommandScopeDefault, 
+    BotCommandScopeAllPrivateChats, BotCommandScopeChat, 
+    MenuButtonCommands, MenuButtonWebApp, WebAppInfo
+)
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,7 +95,7 @@ async def update_trial_commands_for_all_users():
             await update_trial_command_for_user(user.user_id, has_subscription)
 
 
-# Настройка логгирования (Добавлен {message} для отладки)
+# Настройка логгирования
 logger.remove()
 logger.add(
     sys.stdout,
@@ -206,9 +210,15 @@ async def on_startup():
     admin_count = len(settings.admin_ids_list)
     logger.info(f"Зарегистрировано администраторов: {admin_count}")
 
-    # Установка кнопки меню слева от поля ввода
-    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-    logger.info("Кнопка меню установлена")
+    # Установка кнопки Mini App слева от поля ввода (вместо стандартного Меню)
+    webapp_url = "https://nemo-vpn-webapp.vercel.app/"
+    await bot.set_chat_menu_button(
+        menu_button=MenuButtonWebApp(
+            text="Nemo VIP", 
+            web_app=WebAppInfo(url=webapp_url)
+        )
+    )
+    logger.info("Кнопка Mini App установлена в главное меню")
 
     # Установка команд для всех пользователей
     base_commands = [
