@@ -154,7 +154,7 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, sta
     text = "🛍 <b>Магазин подписок Nemo VPN</b>\n\n"
     if has_subscription:
         days_left = (user.expire_date - datetime.utcnow()).days
-        text += f"⏳ <b>Ваша подписка активна ещё {days_left} дн.</b>\n"
+        text += f"⏳ <b>Ваша подписка активна ещё {max(0, days_left)} дн.</b>\n"
         text += "Новая подписка продлит текущую.\n\n"
 
     text += (
@@ -207,8 +207,8 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
             "пожалуйста, перейдите в наше удобное Mini App 👇"
         )
         
-        # Заглушка ссылки. Позже можно вынести в config.py
-        webapp_url = getattr(settings, "MINI_APP_URL", "nemo-vpn-webapp.vercel.app") 
+        # Полный URL с протоколом обязателен для WebApp кнопки
+        webapp_url = "https://nemo-vpn-webapp.vercel.app/" 
         
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="📱 Открыть Mini App", web_app=types.WebAppInfo(url=webapp_url))],
@@ -221,7 +221,8 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
             else:
                 await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
         except Exception as e:
-            logger.error(f"Ошибка редактирования меню VIP Mini App: {e}")
+            logger.error(f"Ошибка редактирования меню VIP Mini App (пробуем новое сообщение): {e}")
+            await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
             
         await callback.answer()
         return
@@ -328,7 +329,7 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
 @router.callback_query(F.data == "pay_crypto")
 async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     """Оплата через CryptoBot (USDT)."""
-    user_id = callback.fromuser.id
+    user_id = callback.from_user.id
     data = await state.get_data()
     
     price_rub = data.get("price", settings.SUBSCRIPTION_PRICE_RUB)

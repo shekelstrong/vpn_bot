@@ -91,11 +91,11 @@ async def update_trial_commands_for_all_users():
             await update_trial_command_for_user(user.user_id, has_subscription)
 
 
-# Настройка логгирования
-logger.remove()  # Удаляем стандартный обработчик
+# Настройка логгирования (Добавлен {message} для отладки)
+logger.remove()
 logger.add(
     sys.stdout,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}:{line}</cyan>",
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}:{line}</cyan> - <level>{message}</level>",
     level="INFO",
 )
 
@@ -108,7 +108,7 @@ logger.add(
     rotation="00:00",
     retention="7 days",
     level="DEBUG",
-    format="{time:YYYY-MM-DD HH:mm:ss} | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}:{line}</cyan>",
+    format="{time:YYYY-MM-DD HH:mm:ss} | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}:{line}</cyan> - {message}",
 )
 
 # Создаем бота и диспетчер
