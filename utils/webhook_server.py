@@ -14,7 +14,7 @@ from database.engine import get_session_factory, init_db
 from database.models import User, PaymentInvoice
 from config import settings
 
-# Импорты обработчиков (предполагается, что они используют функцию обновления)
+# Импорты обработчиков
 from services.crypto_webhook import handle_crypto_webhook_update
 from services.platega_webhook import handle_platega_webhook_update
 from services.marzban_api import marzban_service
@@ -23,10 +23,7 @@ from services.payment_crypto import crypto_bot_service
 
 @web.middleware
 async def cors_middleware(request: web.Request, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]) -> web.StreamResponse:
-    """
-    Middleware для обработки CORS (Cross-Origin Resource Sharing).
-    Необходимо, чтобы Mini App на Vercel/Netlify мог делать запросы к нашему серверу.
-    """
+    """Middleware для обработки CORS."""
     # Логируем входящий путь для отладки
     logger.info(f"📡 API Request: {request.method} {request.path}")
     
@@ -57,7 +54,7 @@ class WebhookHandler:
         self.bot = bot
 
     # ==========================================
-    # СТАРЫЕ РОУТЫ ВЕБХУКОВ (НЕ ТРОГАЕМ ЛОГИКУ)
+    # РОУТЫ ВЕБХУКОВ
     # ==========================================
     
     async def handle_crypto_webhook(self, request: web.Request) -> web.Response:
@@ -88,7 +85,7 @@ class WebhookHandler:
         return web.json_response({"status": "ok", "message": "Nemo VPN Webhook & API Server is running."})
 
     # ==========================================
-    # НОВЫЕ РОУТЫ ДЛЯ MINI APP (API)
+    # РОУТЫ ДЛЯ MINI APP (API)
     # ==========================================
 
     async def api_get_user(self, request: web.Request) -> web.Response:
@@ -108,7 +105,6 @@ class WebhookHandler:
                 if not user:
                     return web.json_response({"error": "user not found"}, status=404)
                 
-                # Данные о трафике из Marzban и получение ключей (НОВОЕ)
                 used_traffic_gb = 0.0
                 sub_url = ""
                 vless_link = ""
@@ -119,24 +115,20 @@ class WebhookHandler:
                         if mz_data:
                             used_traffic_gb = round(mz_data.get('used_traffic', 0) / (1024**3), 2)
                         
-                        # Получаем URL подписки и VLESS ссылку
                         sub_url = await marzban_service.get_user_subscription(user.marzban_username)
                         if sub_url:
                             vless_link = marzban_service.generate_vless_link(user.marzban_username, sub_url)
                     except Exception as e: 
                         logger.error(f"Ошибка получения данных из Marzban для {user.marzban_username}: {e}")
 
-                # Считаем оставшиеся дни
                 days_left = 0
                 if user.expire_date and user.expire_date > datetime.utcnow():
                     delta = user.expire_date - datetime.utcnow()
                     days_left = delta.days
 
-                # Формируем реферальную ссылку бота
                 bot_info = await self.bot.get_me()
                 ref_link = f"https://t.me/{bot_info.username}?start={user.user_id}"
 
-                # ВАЖНО: Возвращаем структуру с ключами 'status' и 'user', которую ждет фронтенд
                 return web.json_response({
                     "status": "success",
                     "user": {
@@ -152,8 +144,8 @@ class WebhookHandler:
                         "ref_link": ref_link,
                         "balance": user.balance,
                         "referral_balance": user.referral_balance,
-                        "sub_url": sub_url,        # НОВОЕ: Передаем ключ маршрутизации
-                        "vless_link": vless_link   # НОВОЕ: Передаем VLESS ключ
+                        "sub_url": sub_url,
+                        "vless_link": vless_link
                     }
                 })
         except Exception as e:
@@ -164,9 +156,13 @@ class WebhookHandler:
         """Проверка подписки на ТГ-канал NEMO VPN для выдачи +3 дней."""
         try:
             data = await request.json()
-            tg_id = int(data.get("tg_id"))
+            tg_id_raw = data.get("tg_id")
             
-            # ID или username канала из ТЗ
+            # ЗАЩИТА: Если tg_id не передан или передан пустой
+            if not tg_id_raw:
+                return web.json_response({"error": "tg_id is required"}, status=400)
+                
+            tg_id = int(tg_id_raw)
             channel_id = "@nemo_vpn_official" 
             
             async with get_session_factory()() as session:
@@ -179,7 +175,6 @@ class WebhookHandler:
                 if user.task_channel_sub:
                     return web.json_response({"status": "already_done", "message": "Задание уже выполнено"})
 
-                # Проверяем подписку через бота
                 try:
                     chat_member = await self.bot.get_chat_member(chat_id=channel_id, user_id=tg_id)
                     is_member = chat_member.status in ["member", "administrator", "creator"]
@@ -188,7 +183,6 @@ class WebhookHandler:
                     is_member = False
 
                 if is_member:
-                    # Даем бонус +3 дня
                     bonus_days = 3
                     now = datetime.utcnow()
                     if user.expire_date and user.expire_date > now:
@@ -198,7 +192,6 @@ class WebhookHandler:
                         
                     user.task_channel_sub = True
                     
-                    # Продлеваем в Marzban
                     if user.marzban_username:
                         try:
                             await marzban_service.update_user_expiry(
@@ -211,7 +204,6 @@ class WebhookHandler:
 
                     await session.commit()
                     
-                    # Отправляем уведомление
                     try:
                         await self.bot.send_message(
                             tg_id,
@@ -235,7 +227,13 @@ class WebhookHandler:
         """
         try:
             data = await request.json()
-            tg_id = int(data.get("tg_id"))
+            tg_id_raw = data.get("tg_id")
+            
+            # ЗАЩИТА: Если tg_id не передан
+            if not tg_id_raw:
+                return web.json_response({"error": "tg_id is required"}, status=400)
+                
+            tg_id = int(tg_id_raw)
             days = int(data.get("days", 30))
             tier = data.get("tier", "premium") 
             device_count = int(data.get("device_count", 1))
@@ -244,36 +242,20 @@ class WebhookHandler:
             
             logger.info(f"💳 Создание счета для {tg_id} через {payment_method} на {amount} руб. Устройств: {device_count}")
 
-            import uuid
-            invoice_uid = f"app_{payment_method}_{uuid.uuid4().hex[:6]}"
             pay_url = None
+            final_invoice_id = ""
 
-            # Генерация ссылки оплаты через существующие сервисы
-            if payment_method == "cryptopay":
-                price_usdt = round(amount / settings.USDT_TO_RUB_RATE, 2)
-                res = await crypto_bot_service.create_invoice(
-                    amount_usdt=price_usdt,
-                    order_id=invoice_uid,
-                    description=f"Nemo VIP: {days} дней ({device_count} устр.)"
-                )
-                if res: pay_url = res[0]
-            
-            elif payment_method == "platega":
-                from services.payment_platega import create_invoice as create_sbp
-                pay_url = await create_sbp(
-                    amount_rub=int(amount),
-                    order_id=invoice_uid,
-                    user_id=tg_id,
-                    description=f"Nemo VIP: {days} дней ({device_count} устр.)"
-                )
-
-            if not pay_url:
-                return web.json_response({"error": "Could not generate payment link"}, status=500)
-
+            # === СНАЧАЛА СОЗДАЕМ ЗАПИСЬ В БД ДЛЯ ПОЛУЧЕНИЯ РОДНОГО ID ===
             async with get_session_factory()() as session:
+                import uuid
+                # Временный ID для обхода ограничения UNIQUE
+                temp_uid = f"temp_{uuid.uuid4().hex[:8]}"
+                
+                # ИСПРАВЛЕНИЕ: Мы убрали 'device_count' из прямого обращения к таблице, 
+                # чтобы PostgreSQL не выдавал ошибку. Данные сохраняются внутри payload.
                 invoice = PaymentInvoice(
                     user_id=tg_id,
-                    invoice_id=invoice_uid,
+                    invoice_id=temp_uid,
                     amount=amount,
                     currency="RUB",
                     payment_method=payment_method,
@@ -286,16 +268,65 @@ class WebhookHandler:
                     created_at=datetime.utcnow()
                 )
                 session.add(invoice)
+                await session.flush() # Получаем настоящий числовой ID из базы
+                
+                # Формируем правильные ID, которые понимают старые вебхуки
+                if payment_method == "cryptopay":
+                    # CryptoBot ожидает, что payload будет просто числом (ID)
+                    final_invoice_id = str(invoice.id)
+                elif payment_method == "platega":
+                    # Platega ожидает строго формат 'platega_{tg_id}_{id}'
+                    final_invoice_id = f"platega_{tg_id}_{invoice.id}"
+                    
+                invoice.invoice_id = final_invoice_id
                 await session.commit()
+                invoice_db_id = invoice.id
+
+            # ЗАПРАШИВАЕМ ССЫЛКУ У ПЛАТЕЖЕК
+            if payment_method == "cryptopay":
+                try:
+                    rate = getattr(settings, 'USDT_TO_RUB_RATE', 95.0)
+                    price_usdt = round(amount / rate, 2)
+                    
+                    res = await crypto_bot_service.create_invoice(
+                        amount_usdt=price_usdt,
+                        order_id=final_invoice_id, 
+                        description=f"Nemo VIP: {days} дней ({device_count} устр.)"
+                    )
+                    if res: pay_url = res[0]
+                except Exception as e:
+                    logger.error(f"Ошибка CryptoBot API: {e}")
+                    raise Exception(f"Ошибка CryptoBot: {e}")
+            
+            elif payment_method == "platega":
+                from services.payment_platega import create_invoice as create_sbp
+                pay_url = await create_sbp(
+                    amount_rub=int(amount),
+                    order_id=final_invoice_id,
+                    user_id=tg_id,
+                    description=f"Nemo VIP: {days} дней ({device_count} устр.)"
+                )
+
+            # ЕСЛИ ПЛАТЕЖКА ВЕРНУЛА ОШИБКУ — УДАЛЯЕМ МУСОР ИЗ БАЗЫ
+            if not pay_url:
+                async with get_session_factory()() as session:
+                    result = await session.execute(select(PaymentInvoice).where(PaymentInvoice.id == invoice_db_id))
+                    inv_to_del = result.scalar_one_or_none()
+                    if inv_to_del:
+                        await session.delete(inv_to_del)
+                        await session.commit()
+                return web.json_response({"error": "Не удалось сгенерировать ссылку в платежной системе"}, status=500)
 
             return web.json_response({
                 "status": "success", 
                 "pay_url": pay_url,
-                "invoice_id": invoice_uid
+                "invoice_id": final_invoice_id
             })
             
         except Exception as e:
             logger.error(f"API Create Invoice Error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return web.json_response({"error": str(e)}, status=500)
 
 
@@ -305,7 +336,7 @@ async def run_webhooks(bot=None):
     
     handler = WebhookHandler(bot=bot)
     
-    # Добавляем middleware для CORS (чтобы Mini App работал)
+    # Добавляем middleware для CORS
     app = web.Application(middlewares=[cors_middleware])
     
     # Роуты вебхуков
@@ -313,7 +344,7 @@ async def run_webhooks(bot=None):
     app.router.add_post('/platega-webhook', handler.handle_platega_webhook)
     app.router.add_post('/webhook/platega', handler.handle_platega_webhook)
     
-    # Роуты возврата пользователя (чтобы не было 521/404)
+    # Роуты возврата пользователя
     app.router.add_get('/pay_success', handler.handle_pay_success)
     app.router.add_get('/pay_failed', handler.handle_pay_failed)
     
@@ -328,7 +359,6 @@ async def run_webhooks(bot=None):
     runner = web.AppRunner(app)
     await runner.setup()
     
-    # Порт по умолчанию 8080 (как было в ТЗ)
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
     

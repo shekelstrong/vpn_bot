@@ -78,7 +78,9 @@ async def init_db():
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS device_count INTEGER DEFAULT 1",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS gb_limit FLOAT",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS task_channel_sub BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS refs_paid_count INTEGER DEFAULT 0"
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS refs_paid_count INTEGER DEFAULT 0",
+            # === НОВАЯ МИГРАЦИЯ: Добавляем device_count в инвойсы, чтобы избежать ошибки 500 ===
+            "ALTER TABLE payment_invoices ADD COLUMN IF NOT EXISTS device_count INTEGER DEFAULT 1"
         ]
         
         for sql in migrations:
