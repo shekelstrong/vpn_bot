@@ -5,6 +5,9 @@ services:
     restart: always
     env_file:
       - .env
+    # Добавили expose, чтобы Nginx видел новый API внутри бота
+    expose:
+      - "8080"
     # Volume убран для корректной работы - файлы копируются при сборке образа
     depends_on:
       - nemo_vpn_db
@@ -55,11 +58,17 @@ services:
     image: nginx:alpine
     container_name: nemo_vpn_nginx
     restart: always
+    # ОТКРЫЛИ ПОРТЫ 80 и 443 ДЛЯ HTTPS
     ports:
-      - "8082:80"
+      - "80:80"
+      - "443:443"
+    # ПРОКИНУЛИ ПАПКИ С СЕРТИФИКАТАМИ LET'S ENCRYPT
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/lib/letsencrypt:/var/lib/letsencrypt:ro
     depends_on:
+      - nemo_vpn_bot
       - nemo_vpn_webhooks
     networks:
       - nemo_net
