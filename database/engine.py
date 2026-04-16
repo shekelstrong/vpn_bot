@@ -24,7 +24,7 @@ def get_engine() -> AsyncEngine:
         # Используем PostgreSQL из файла конфигурации (.env)
         engine = create_async_engine(
             settings.DATABASE_URL,
-            echo=False,  # Отключаем спам SQL-запросов в логи
+            echo=False, # Отключаем спам SQL-запросов в логи
         )
     return engine
 
@@ -65,17 +65,37 @@ async def drop_tables():
         await conn.run_sync(Base.metadata.drop_all)
 
 async def init_db():
-    """Инициализировать базу данных: создать таблицы."""
+    """Инициализировать базу данных: создать таблицы и применить миграции."""
     await create_tables()
     
-    # Безопасная миграция: добавляем колонку tier "на горячую", если её нет.
+    # Безопасная миграция: добавляем колонки "на горячую", если их нет.
     # Это гарантированно сохранит всех старых пользователей, их балансы и подписки.
     async with get_engine().begin() as conn:
         try:
             await conn.execute(text("ALTER TABLE users ADD COLUMN tier VARCHAR(50) DEFAULT 'standard'"))
         except Exception:
-            # Ошибка здесь означает, что колонка уже успешно создана ранее.
-            # Бот просто проигнорирует ошибку и продолжит работу в штатном режиме.
+            # Ошибка здесь означает, что колонка уже создана ранее. Игнорируем.
+            pass
+            
+        # === Миграции для Mini App ===
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN device_count INTEGER DEFAULT 1"))
+        except Exception:
+            pass
+            
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN gb_limit FLOAT"))
+        except Exception:
+            pass
+            
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN task_channel_sub BOOLEAN DEFAULT FALSE"))
+        except Exception:
+            pass
+            
+        try:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN refs_paid_count INTEGER DEFAULT 0"))
+        except Exception:
             pass
 
 async def close_db():

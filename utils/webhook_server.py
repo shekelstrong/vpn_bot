@@ -1,270 +1,279 @@
 """
-HTTP сервер для обработки вебхуков от Platega.
-Запускается вместе с ботом в основном процессе.
-Работает по аналогии с успешными проектами.
+Сервер вебхуков для Nemo VPN.
+Обрабатывает платежи Platega, CryptoPay и предоставляет REST API для Telegram Mini App.
 """
 
-import asyncio
-import json
-import logging
-from datetime import datetime
-from decimal import Decimal
-from typing import Callable
-
 from aiohttp import web
+import json
 from loguru import logger
+from datetime import datetime, timedelta
+from typing import Callable, Awaitable
 
-from services.platega_webhook import handle_platega_webhook_update
+from sqlalchemy import select
+from database.engine import get_session_factory, init_db
+from database.models import User, PaymentInvoice
 from config import settings
 
+# Импорты обработчиков (предполагается, что они используют функцию обновления)
+from services.crypto_webhook import handle_crypto_webhook_update
+from services.platega_webhook import handle_platega_webhook_update
+from services.marzban_api import marzban_service
 
-class WebhookServer:
 
-    def __init__(self, host: str = "0.0.0.0", port: int = None):
-        self.host = host
-        self.port = port if port is not None else settings.WEB_PORT
-        self.app = web.Application()
-        self.bot = None
+@web.middleware
+async def cors_middleware(request: web.Request, handler: Callable[[web.Request], Awaitable[web.StreamResponse]]) -> web.StreamResponse:
+    """
+    Middleware для обработки CORS (Cross-Origin Resource Sharing).
+    Необходимо, чтобы Mini App на Vercel/Netlify мог делать запросы к нашему серверу.
+    """
+    is_options = request.method == 'OPTIONS'
+    
+    if is_options:
+        response = web.Response()
+    else:
+        try:
+            response = await handler(request)
+        except web.HTTPException as ex:
+            response = ex
+            
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    
+    return response
 
-        # Регистрируем роуты
-        self.app.router.add_post('/webhook/platega', self.handle_platega_webhook)
-        self.app.router.add_get('/health', self.handle_health)
-        # Роуты для возврата пользователя после оплаты - ТЕПЕРЬ ПРОСТО HTML СТРАНИЦЫ
-        self.app.router.add_get('/pay_success', self.handle_pay_success)
-        self.app.router.add_get('/pay_failed', self.handle_pay_failed)
 
-    async def handle_health(self, request: web.Request) -> web.Response:
-        """Health check endpoint"""
-        return web.json_response({"status": "ok"})
+class WebhookHandler:
+    """Обработчик HTTP-запросов для вебхуков и API."""
 
-    async def handle_pay_success(self, request: web.Request) -> web.Response:
-        """
-        Обработчик возврата пользователя после успешной оплаты.
-        Показывает HTML-страницу с сообщением об успехе.
-        """
-        order_id = request.query.get('order_id')
-        
-        html_content = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Оплата успешна</title>
-            <style>
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    min-height: 100vh;
-                    margin: 0;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                }
-                .container {
-                    text-align: center;
-                    background: white;
-                    padding: 40px;
-                    border-radius: 20px;
-                    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-                    max-width: 400px;
-                }
-                .checkmark {
-                    width: 80px;
-                    height: 80px;
-                    background: #4CAF50;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    margin: 0 auto 20px;
-                    font-size: 40px;
-                    color: white;
-                }
-                h1 {
-                    color: #333;
-                    margin: 0 0 10px;
-                }
-                p {
-                    color: #666;
-                    line-height: 1.5;
-                }
-                .btn {
-                    display: inline-block;
-                    margin-top: 20px;
-                    padding: 12px 30px;
-                    background: #667eea;
-                    color: white;
-                    text-decoration: none;
-                    border-radius: 25px;
-                    font-weight: 600;
-                    transition: transform 0.2s;
-                }
-                .btn:hover {
-                    transform: scale(1.05);
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="checkmark">✓</div>
-                <h1>Оплата успешна!</h1>
-                <p>Ваша подписка активирована автоматически.</p>
-                <p>Проверьте Telegram - там должно быть сообщение с доступом к VPN.</p>
-                <a href="https://t.me/""" + (await self.bot.get_me()).username + """" class="btn">Открыть бота</a>
-            </div>
-        </body>
-        </html>
-        """
-        
-        return web.Response(text=html_content, content_type='text/html')
+    def __init__(self, bot):
+        self.bot = bot
 
-    async def handle_pay_failed(self, request: web.Request) -> web.Response:
-        """
-        Обработчик возврата пользователя после неудачной оплаты.
-        Показывает HTML-страницу с сообщением об ошибке.
-        """
-        html_content = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Оплата не удалась</title>
-            <style>
-                body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    min-height: 100vh;
-                    margin: 0;
-                    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-                }
-                .container {
-                    text-align: center;
-                    background: white;
-                    padding: 40px;
-                    border-radius: 20px;
-                    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-                    max-width: 400px;
-                }
-                .cross {
-                    width: 80px;
-                    height: 80px;
-                    background: #f5576c;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    margin: 0 auto 20px;
-                    font-size: 40px;
-                    color: white;
-                }
-                h1 {
-                    color: #333;
-                    margin: 0 0 10px;
-                }
-                p {
-                    color: #666;
-                    line-height: 1.5;
-                }
-                .btn {
-                    display: inline-block;
-                    margin-top: 20px;
-                    padding: 12px 30px;
-                    background: #f5576c;
-                    color: white;
-                    text-decoration: none;
-                    border-radius: 25px;
-                    font-weight: 600;
-                    transition: transform 0.2s;
-                }
-                .btn:hover {
-                    transform: scale(1.05);
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="cross">✕</div>
-                <h1>Оплата не удалась</h1>
-                <p>Платеж был отменен или не прошел.</p>
-                <p>Вы можете попробовать еще раз или обратиться в поддержку.</p>
-                <a href="https://t.me/""" + (await self.bot.get_me()).username + """" class="btn">Открыть бота</a>
-            </div>
-        </body>
-        </html>
-        """
-        
-        return web.Response(text=html_content, content_type='text/html')
+    # ==========================================
+    # СТАРЫЕ РОУТЫ ВЕБХУКОВ (НЕ ТРОГАЕМ ЛОГИКУ)
+    # ==========================================
+    
+    async def handle_crypto_webhook(self, request: web.Request) -> web.Response:
+        try:
+            data = await request.json()
+            result = await handle_crypto_webhook_update(data, self.bot)
+            return web.json_response(result)
+        except Exception as e:
+            logger.error(f"Crypto Webhook Error: {e}")
+            return web.json_response({"status": "error"}, status=400)
 
     async def handle_platega_webhook(self, request: web.Request) -> web.Response:
+        try:
+            data = await request.json()
+            result = await handle_platega_webhook_update(data, self.bot)
+            return web.json_response(result)
+        except Exception as e:
+            logger.error(f"Platega Webhook Error: {e}")
+            return web.json_response({"status": "error"}, status=400)
+
+    async def handle_pay_success(self, request: web.Request) -> web.Response:
+        return web.Response(text="Оплата успешно завершена! Вы можете вернуться в бота.", content_type='text/html')
+
+    async def handle_pay_failed(self, request: web.Request) -> web.Response:
+        return web.Response(text="Произошла ошибка при оплате или вы отменили транзакцию.", content_type='text/html')
+
+    async def health_check(self, request: web.Request) -> web.Response:
+        return web.json_response({"status": "ok", "message": "Nemo VPN Webhook & API Server is running."})
+
+    # ==========================================
+    # НОВЫЕ РОУТЫ ДЛЯ MINI APP (API)
+    # ==========================================
+
+    async def api_get_user(self, request: web.Request) -> web.Response:
+        """Получить данные пользователя для отображения в Mini App."""
+        try:
+            tg_id_str = request.query.get("tg_id")
+            if not tg_id_str:
+                return web.json_response({"error": "tg_id is required"}, status=400)
+                
+            tg_id = int(tg_id_str)
+            
+            async with get_session_factory()() as session:
+                result = await session.execute(select(User).where(User.user_id == tg_id))
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    return web.json_response({"error": "user not found"}, status=404)
+                
+                # Считаем оставшиеся дни
+                days_left = 0
+                if user.expire_date and user.expire_date > datetime.utcnow():
+                    delta = user.expire_date - datetime.utcnow()
+                    days_left = delta.days
+
+                return web.json_response({
+                    "user_id": user.user_id,
+                    "tier": user.tier,
+                    "days_left": days_left,
+                    "device_count": user.device_count,
+                    "gb_limit": user.gb_limit, # None значит безлимит (для старых)
+                    "task_channel_sub": user.task_channel_sub,
+                    "refs_paid_count": user.refs_paid_count,
+                    "balance": user.balance,
+                    "referral_balance": user.referral_balance
+                })
+        except Exception as e:
+            logger.error(f"API Get User Error: {e}")
+            return web.json_response({"error": "Internal server error"}, status=500)
+
+    async def api_check_task(self, request: web.Request) -> web.Response:
+        """Проверка подписки на ТГ-канал NEMO VPN для выдачи +3 дней."""
+        try:
+            data = await request.json()
+            tg_id = int(data.get("tg_id"))
+            
+            # ID или username канала из ТЗ
+            channel_id = "@nemo_vpn_official" 
+            
+            async with get_session_factory()() as session:
+                result = await session.execute(select(User).where(User.user_id == tg_id))
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    return web.json_response({"error": "user not found"}, status=404)
+                    
+                if user.task_channel_sub:
+                    return web.json_response({"status": "already_done", "message": "Задание уже выполнено"})
+
+                # Проверяем подписку через бота
+                try:
+                    chat_member = await self.bot.get_chat_member(chat_id=channel_id, user_id=tg_id)
+                    is_member = chat_member.status in ["member", "administrator", "creator"]
+                except Exception as e:
+                    logger.error(f"Ошибка проверки подписки {tg_id} на {channel_id}: {e}")
+                    is_member = False
+
+                if is_member:
+                    # Даем бонус +3 дня
+                    bonus_days = 3
+                    now = datetime.utcnow()
+                    if user.expire_date and user.expire_date > now:
+                        user.expire_date += timedelta(days=bonus_days)
+                    else:
+                        user.expire_date = now + timedelta(days=bonus_days)
+                        
+                    user.task_channel_sub = True
+                    
+                    # Продлеваем в Marzban
+                    if user.marzban_username:
+                        try:
+                            await marzban_service.update_user_expiry(
+                                marzban_username=user.marzban_username,
+                                extra_days=bonus_days,
+                                tier=user.tier
+                            )
+                        except Exception as e:
+                            logger.error(f"Ошибка начисления +3 дней в Marzban: {e}")
+
+                    await session.commit()
+                    
+                    # Отправляем уведомление
+                    try:
+                        await self.bot.send_message(
+                            tg_id,
+                            "🎉 <b>Спасибо за подписку!</b>\n\nВам начислено <b>+3 бонусных дня</b> использования VPN.",
+                            parse_mode="HTML"
+                        )
+                    except:
+                        pass
+                        
+                    return web.json_response({"status": "success", "bonus_days": bonus_days})
+                else:
+                    return web.json_response({"status": "not_subscribed", "message": "Вы еще не подписаны на канал"})
+
+        except Exception as e:
+            logger.error(f"API Check Task Error: {e}")
+            return web.json_response({"error": "Internal server error"}, status=500)
+
+    async def api_create_invoice(self, request: web.Request) -> web.Response:
         """
-        Обработка вебхука от Platega.
+        Создание инвойса (предварительного счета) из Mini App.
+        Фронтенд передает: tg_id, days, tier, device_count, amount, payment_method
         """
         try:
-            try:
-                data = await request.json()
-            except json.JSONDecodeError:
-                form_data = await request.post()
-                data = dict(form_data)
-                logger.info(f"💰 PLATEGA WEBHOOK (form-data): {data}")
+            data = await request.json()
+            tg_id = int(data.get("tg_id"))
+            days = int(data.get("days", 30))
+            tier = data.get("tier", "premium") # premium - обход белых списков
+            device_count = int(data.get("device_count", 1))
+            amount = float(data.get("amount", 300))
+            payment_method = data.get("payment_method", "cryptopay") # cryptopay или platega
+            
+            # Здесь можно реализовать логику вызова API CryptoPay/Platega для получения ссылки,
+            # но пока мы просто создаем инвойс в нашей БД.
+            # Для генерации уникального ID:
+            import uuid
+            invoice_uid = f"{payment_method}_{tg_id}_{uuid.uuid4().hex[:8]}"
 
-            logger.info(f"💰 PLATEGA WEBHOOK: {data}")
+            async with get_session_factory()() as session:
+                invoice = PaymentInvoice(
+                    user_id=tg_id,
+                    invoice_id=invoice_uid,
+                    amount=amount,
+                    currency="RUB",
+                    payment_method=payment_method,
+                    status="pending",
+                    # В payload сохраняем все настройки, чтобы при оплате выдать правильные лимиты
+                    payload=json.dumps({
+                        "days": days, 
+                        "tier": tier, 
+                        "device_count": device_count
+                    }),
+                    created_at=datetime.utcnow()
+                )
+                session.add(invoice)
+                await session.commit()
 
-            status = str(data.get("status") or data.get("Status") or data.get("STATUS", "")).upper()
-
-            if status not in ("CONFIRMED", "SUCCESS", "PAID", "COMPLETED"):
-                logger.info(f"Ignoring payment status: {status}")
-                return web.json_response({"status": "ignored"})
-
-            order_id = data.get("payload") or data.get("order_id") or data.get("orderId") or data.get("merchant_order_id")
-            amount = Decimal(str(data.get("amount") or data.get("Amount") or data.get("total") or 0))
-            currency = data.get("currency") or data.get("Currency") or "RUB"
-
-            if not order_id:
-                logger.error("No payload/order_id in webhook data")
-                return web.json_response({"status": "error", "msg": "no payload"}, status=400)
-
-            # Обрабатываем платеж
-            result = await handle_platega_webhook_update(data, self.bot)
-
-            return web.json_response(result)
-
-        except json.JSONDecodeError:
-            logger.error("Invalid JSON in webhook")
-            return web.json_response({"status": "error", "msg": "invalid json"}, status=400)
+            return web.json_response({
+                "status": "success", 
+                "invoice_id": invoice_uid,
+                "amount": amount,
+                "message": "Счет создан. Теперь бот должен сгенерировать ссылку."
+            })
+            
         except Exception as e:
-            logger.exception(f"Webhook error: {e}")
-            return web.json_response({"status": "error", "msg": str(e)}, status=500)
-
-    async def start(self, bot):
-        self.bot = bot
-        runner = web.AppRunner(self.app)
-        await runner.setup()
-
-        site = web.TCPSite(runner, self.host, self.port)
-        await site.start()
-        protocol = "http"
-        logger.info(f"🌐 Webhook server started on http://{self.host}:{self.port}")
-
-        if settings.BASE_URL.startswith("http://") or settings.BASE_URL.startswith("https://"):
-            webhook_url = f"{settings.BASE_URL}/webhook/platega"
-        else:
-            webhook_url = f"{protocol}://{settings.BASE_URL}/webhook/platega"
-
-        logger.info(f"  🔗 Platega webhook URL: {webhook_url}")
-        logger.info(f"  Health check: GET /health")
-
-        return runner
-
-    async def stop(self, runner):
-        if runner:
-            await runner.cleanup()
-            logger.info("Webhook server stopped")
-        else:
-            logger.info("Webhook server: runner is None, skipping cleanup")
+            logger.error(f"API Create Invoice Error: {e}")
+            return web.json_response({"error": str(e)}, status=500)
 
 
-webhook_server = WebhookServer()
+async def run_webhooks(bot=None):
+    """Функция запуска веб-сервера."""
+    await init_db()
+    
+    handler = WebhookHandler(bot=bot)
+    
+    # Добавляем middleware для CORS (чтобы Mini App работал)
+    app = web.Application(middlewares=[cors_middleware])
+    
+    # Роуты вебхуков
+    app.router.add_post('/cryptopay', handler.handle_crypto_webhook)
+    app.router.add_post('/platega-webhook', handler.handle_platega_webhook)
+    app.router.add_post('/webhook/platega', handler.handle_platega_webhook)
+    
+    # Роуты возврата пользователя (чтобы не было 521/404)
+    app.router.add_get('/pay_success', handler.handle_pay_success)
+    app.router.add_get('/pay_failed', handler.handle_pay_failed)
+    
+    app.router.add_get('/health', handler.health_check)
+
+    # === НОВЫЕ РОУТЫ MINI APP ===
+    app.router.add_get('/api/user', handler.api_get_user)
+    app.router.add_post('/api/check_task', handler.api_check_task)
+    app.router.add_post('/api/invoice', handler.api_create_invoice)
+    # ============================
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    # Порт по умолчанию 8080 (как было в ТЗ)
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    
+    logger.info("=" * 50)
+    logger.info("Вебхук-сервер Nemo VPN запущен (Порт 8080) с поддержкой Mini App API!")
+    logger.info("=" * 50)

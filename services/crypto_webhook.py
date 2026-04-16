@@ -1,243 +1,321 @@
 """
-Обработчик webhook'ов CryptoBot для автоматической выдачи подписок.
+Обработчик webhook'ов CryptoPay для автоматической выдачи подписок.
 """
 
+import json
 from aiogram import Bot
-from aiocryptopay import AioCryptoPay
 from loguru import logger
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, Optional
+from decimal import Decimal
+
 from config import settings
-from database.models import User, PaymentInvoice
+from database.models import User, PaymentInvoice, Transaction
 from services.marzban_api import marzban_service
-from services.crypto_bot_v2 import crypto_bot_v2_service
-import json
+from sqlalchemy import select
+from database.engine import get_session_factory
 
 
-async def handle_crypto_webhook_update(update: Dict[str, Any], bot: Bot) -> Dict[str, str]:
-    """
-    Обработать обновление от CryptoBot webhook.
-    
-    Args:
-        update: Обновление от CryptoBot
-        bot: Экземпляр Telegram бота
-        
-    Returns:
-        Dict: {"status": "ok"} или {"error": "сообщение"}
-    """
-    logger.info(f"=" * 50)
-    logger.info(f"CryptoBot webhook получен")
-    logger.info(f"=" * 50)
+async def handle_crypto_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[str, str]:
+    """Обработать обновление от CryptoPay webhook."""
+    logger.info("=" * 50)
+    logger.info("🪙 CRYPTO WEBHOOK получен")
+    logger.info("=" * 50)
     
     try:
-        # Проверяем тип обновления
-        if update.get("update_type") != "invoice_paid":
-            logger.info(f"Неподдерживаемый update_type: {update.get('update_type')}")
-            return {"status": "ok", "message": "Неподдерживаемый тип"}
+        update_type = data.get("update_type")
+        if update_type != "invoice_paid":
+            logger.info(f"Ignoring update_type: {update_type}")
+            return {"status": "ok", "message": "Тип обновления не требует обработки"}
+
+        payload = data.get("payload", {})
+        status = payload.get("status")
+
+        if status != "paid":
+            logger.info(f"Ignoring crypto payment status: {status}")
+            return {"status": "ok", "message": "Статус не требует обработки"}
+
+        # Извлекаем данные инвойса
+        invoice_id = str(payload.get("invoice_id"))
+        amount = Decimal(str(payload.get("amount", 0)))
+        asset = payload.get("asset", "USDT")
+        fiat_amount = Decimal(str(payload.get("fiat_amount", 0)))
+        fiat_currency = payload.get("fiat_currency", "RUB")
         
-        # Проверяем подпись
-        if not crypto_bot_v2_service.verify_webhook_update(update):
-            logger.error("Неверная подпись webhook")
-            return {"status": "error", "message": "Неверная подпись"}
-        
-        invoice = update.get("payload", {})
-        
-        if not invoice:
-            logger.error("Webhook не содержит invoice")
-            return {"status": "error", "message": "Invoice отсутствует"}
-        
-        invoice_id = str(invoice.get("invoice_id", ""))
-        asset = invoice.get("asset", "")
-        amount = float(invoice.get("amount", 0))
-        
-        logger.info(f"Информация о счете:")
-        logger.info(f"  Invoice ID: {invoice_id}")
-        logger.info(f"  Asset: {asset}")
-        logger.info(f"  Amount: {amount}")
-        logger.info(f"  Status: {invoice.get('status')}")
-        
-        # Парсим custom_payload
-        custom_payload_str = invoice.get("payload", "")
-        user_id = None
-        days = 30
-        
-        if custom_payload_str:
-            try:
-                custom_payload = json.loads(custom_payload_str)
-                user_id = custom_payload.get("user_id")
-                days = custom_payload.get("days", 30)
-                
-                logger.info(f"Custom payload:")
-                logger.info(f"  User ID: {user_id}")
-                logger.info(f"  Days: {days}")
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"Ошибка парсинга custom_payload: {e}")
-        
-        if not user_id:
-            logger.error("Не удалось получить user_id из custom_payload")
-            return {"status": "error", "message": "User ID отсутствует"}
-        
-        # Проверяем, оплачен ли счет
-        if invoice.get("status") != "paid":
-            logger.info(f"Счет {invoice_id} не оплачен (статус: {invoice.get('status')})")
-            return {"status": "ok", "message": "Счет не оплачен"}
-        
-        logger.info(f"=" * 50)
-        logger.info(f"Обработка оплаты: {user_id}")
-        logger.info(f"=" * 50)
-        
-        # Получаем пользователя из базы данных (нужно передать session)
-        from database.engine import get_session_factory
-        
-        async with get_session_factory()() as session:
-            from sqlalchemy import select
-            
-            result = await session.execute(
-                select(User).where(User.user_id == user_id)
-            )
-            user = result.scalar_one_or_none()
-            
-            if not user:
-                logger.error(f"Пользователь {user_id} не найден в базе данных")
-                return {"status": "error", "message": "Пользователь не найден"}
-            
-            # Проверяем, оплачен ли этот счет (защита от дублей)
-            existing_invoice = await session.execute(
-                select(PaymentInvoice).where(PaymentInvoice.invoice_id == invoice_id)
-            )
-            existing = existing_invoice.scalar_one_or_none()
-            
-            if existing and existing.status == "paid":
-                logger.info(f"Счет {invoice_id} уже был обработан")
-                return {"status": "ok", "message": "Уже обработан"}
-            
-            # Обновляем статус счета на "paid"
-            if existing:
-                existing.status = "paid"
-            else:
-                new_invoice = PaymentInvoice(
-                    user_id=user_id,
-                    invoice_id=invoice_id,
-                    amount=amount,
-                    currency="USDT",
-                    payment_method="cryptobot",
-                    status="paid",
-                    payload=f'{{"days": {days}}}',
-                    created_at=datetime.utcnow()
-                )
-                session.add(new_invoice)
-            
-            logger.info(f"Счет {invoice_id} обновлен на статус 'paid'")
-            
-            # ВЫДАЧА ПОДПИСКИ
-            await issue_subscription(
-                bot=bot,
-                user=user,
-                days=days,
-                session=session,
-                payment_id=invoice_id
-            )
-            
-            logger.info(f"=" * 50)
-            logger.info(f"✅ Подписка выдана пользователю {user_id} на {days} дней")
-            logger.info(f"=" * 50)
-            
-            await session.commit()
-            
-            return {"status": "ok", "message": "Подписка выдана"}
-        
+        # Мы используем payload, который мы передавали при создании (в CryptoPay это hidden_message или payload, 
+        # но надежнее брать наш invoice_id и искать по нему в БД)
+        order_id = payload.get("payload") or invoice_id
+
+        logger.info(f"Платеж CryptoPay:")
+        logger.info(f"  Invoice ID / Order ID: {order_id}")
+        logger.info(f"  Amount: {amount} {asset} (~{fiat_amount} {fiat_currency})")
+        logger.info(f"  Status: {status}")
+
+        if not order_id:
+            logger.error("No payload/order_id in webhook data")
+            return {"status": "error", "message": "Отсутствует order_id"}
+
+        # В качестве суммы зачисления используем фиатный эквивалент (в рублях)
+        process_amount = fiat_amount if fiat_amount > 0 else amount
+
+        result = await process_crypto_payment(order_id, process_amount, bot)
+
+        return {"status": "ok", "message": "Подписка выдана"}
+
     except Exception as e:
-        logger.error(f"❌ Ошибка обработки webhook: {e}")
+        logger.error(f"❌ Ошибка обработки crypto webhook: {e}")
         import traceback
         logger.error(f"Traceback:\n{traceback.format_exc()}")
         return {"status": "error", "message": str(e)}
 
 
-async def issue_subscription(
-    bot: Bot,
-    user: User,
-    days: int,
-    session,
-    payment_id: str
-):
+async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bool:
     """
-    Выдать подписку пользователю.
-    
-    Args:
-        bot: Экземпляр Telegram бота
-        user: Пользователь из базы данных
-        days: Срок подписки в днях
-        session: Сессия базы данных
-        payment_id: ID платежа
+    Единая функция обработки криптовалютного платежа.
     """
-    logger.info(f"Выдача подписки пользователю {user.user_id} на {days} дней")
-    
-    # Рассчитываем новую дату окончания
-    now = datetime.utcnow()
-    
-    if user.expire_date and user.expire_date > now:
-        # Если подписка уже активна - продлеваем
-        new_expire_date = user.expire_date + timedelta(days=days)
-        logger.info(f"Продление подписки с {user.expire_date} до {new_expire_date}")
-    else:
-        # Если подписка не активна или истекла - задаем новую
-        new_expire_date = now + timedelta(days=days)
-        logger.info(f"Новая подписка с {now} до {new_expire_date}")
-    
-    user.expire_date = new_expire_date
-    
-    # Если триал использован - помечаем
-    if user.is_trial_used and not (user.expire_date and user.expire_date > now):
-        # Если пользователь продлевает триал до полной подписки
-        pass
-    
-    try:
-        if user.marzban_username:
+    logger.info(f"🔄 Обработка крипто-платежа order_id={order_id}, amount={amount} RUB")
+
+    async with get_session_factory()() as session:
+        # Ищем инвойс в нашей БД
+        existing = await session.execute(
+            select(PaymentInvoice).where(PaymentInvoice.invoice_id == str(order_id))
+        )
+        invoice = existing.scalar_one_or_none()
+
+        if not invoice:
+            logger.error(f"Invoice not found in DB: {order_id}")
+            return False
+
+        user_telegram_id = invoice.user_id
+
+        # Находим пользователя
+        result = await session.execute(select(User).where(User.user_id == user_telegram_id))
+        user = result.scalar_one_or_none()
+
+        if not user:
+            logger.error(f"User not found: {user_telegram_id}")
+            return False
+
+        # Получаем days и tier из payload инвойса
+        days = 30
+        tier = "standard"
+
+        if invoice.payload:
             try:
+                payload_data = json.loads(invoice.payload)
+                days = payload_data.get("days", 30)
+                tier = payload_data.get("tier", "standard")
+            except Exception as e:
+                logger.warning(f"Failed to parse invoice payload: {e}")
+
+        logger.info(f"Crypto Payment: user={user_telegram_id}, days={days}, tier={tier}, amount={amount}")
+
+        # Проверяем, есть ли уже оплаченный инвойс
+        if invoice.status == "paid":
+            logger.info(f"Payment already processed: {order_id}")
+            return True
+
+        # Обновляем инвойс
+        invoice.status = "paid"
+
+        # === НОВОЕ: Проверяем, первая ли это оплата (до добавления транзакции) ===
+        prev_paid_tx = await session.execute(
+            select(Transaction)
+            .where(Transaction.user_id == user_telegram_id)
+            .where(Transaction.status == "paid")
+            .limit(1)
+        )
+        is_first_payment = prev_paid_tx.scalar_one_or_none() is None
+        # =========================================================================
+
+        # Создаем транзакцию
+        transaction = Transaction(
+            user_id=user_telegram_id,
+            amount=float(amount),
+            currency="RUB",
+            payment_method="cryptopay",
+            status="paid",
+            payment_id=str(order_id),
+            description=f"Оплата подписки на {days} дней (Crypto)"
+        )
+        session.add(transaction)
+
+        # === ВЫДАЧА ПОДПИСКИ ===
+        now = datetime.utcnow()
+        is_extension = bool(user.expire_date and user.expire_date > now)
+
+        if is_extension:
+            user.expire_date = user.expire_date + timedelta(days=days)
+            logger.info(f"Продление подписки с {user.expire_date - timedelta(days=days)} до {user.expire_date}")
+        else:
+            user.expire_date = now + timedelta(days=days)
+            logger.info(f"Новая подписка до {user.expire_date}")
+
+        # НОВОЕ: Обновляем тариф пользователя в базе данных
+        user.tier = tier
+
+        # === MARZBAN ===
+        try:
+            if user.marzban_username:
+                # Проверяем существование в Marzban
                 marzban_user = await marzban_service.get_user(user.marzban_username)
-                
                 if marzban_user:
                     await marzban_service.update_user_expiry(
-                        user.marzban_username,
-                        days
+                        marzban_username=user.marzban_username,
+                        extra_days=days,
+                        tier=tier
                     )
-                    logger.info(f"Подписка пользователя {user.marzban_username} продлена на {days} дней")
+                    logger.info(f"✅ Marzban: подписка {user.marzban_username} продлена на {days} дней (Тариф: {tier})")
                 else:
-                    logger.info(f"Пользователь {user.marzban_username} не найден в Marzban, создаем нового")
                     new_user = await marzban_service.create_user(
-                        tg_id=user.user_id,
+                        tg_id=user_telegram_id,
                         username=user.username,
                         expire_days=days,
-                        data_limit_gb=0.0
+                        data_limit_gb=0.0,
+                        tier=tier
                     )
                     user.marzban_username = new_user.get("username")
-                    logger.info(f"Создан пользователь Marzban: {user.marzban_username}")
-            except Exception as e:
-                logger.error(f"Ошибка обновления Marzban: {e}")
-                raise
-        else:
-            try:
+                    logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
+            else:
                 new_user = await marzban_service.create_user(
-                    tg_id=user.user_id,
+                    tg_id=user_telegram_id,
                     username=user.username,
                     expire_days=days,
-                    data_limit_gb=0.0
+                    data_limit_gb=0.0,
+                    tier=tier
                 )
                 user.marzban_username = new_user.get("username")
-                logger.info(f"Создан новый пользователь Marzban: {user.marzban_username}")
-            except Exception as e:
-                logger.error(f"Ошибка создания пользователя в Marzban: {e}")
-                raise
-        
+                logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
+        except Exception as e:
+            logger.error(f"❌ Marzban error: {e}")
+
+        # === РЕФЕРАЛЬНЫЕ БОНУСЫ (3 уровня) ===
+        referrers_bonuses = []
         try:
+            percentages = settings.referral_percentages_list
+            current_referrer_id = user.referrer_id
+
+            for level, pct in enumerate(percentages, 1):
+                if not current_referrer_id:
+                    break
+
+                ref_result = await session.execute(
+                    select(User).where(User.user_id == current_referrer_id)
+                )
+                referrer = ref_result.scalar_one_or_none()
+
+                if not referrer:
+                    break
+
+                bonus = float(amount) * (pct / 100.0)
+                referrer.referral_balance += bonus
+                
+                # === НОВАЯ ЛОГИКА ДЛЯ ЗАДАНИЙ (Только для 1 уровня) ===
+                bonus_days_msg = ""
+                if level == 1 and is_first_payment:
+                    referrer.refs_paid_count += 1
+                    bonus_days = 0
+                    
+                    # Мотивационная лесенка дней
+                    if referrer.refs_paid_count == 1:
+                        bonus_days = 5
+                    elif referrer.refs_paid_count == 5:
+                        bonus_days = 14
+                    elif referrer.refs_paid_count == 10:
+                        bonus_days = 30
+                        
+                    if bonus_days > 0:
+                        ref_now = datetime.utcnow()
+                        if referrer.expire_date and referrer.expire_date > ref_now:
+                            referrer.expire_date += timedelta(days=bonus_days)
+                        else:
+                            referrer.expire_date = ref_now + timedelta(days=bonus_days)
+                            
+                        # Продлеваем в Marzban
+                        if referrer.marzban_username:
+                            try:
+                                await marzban_service.update_user_expiry(
+                                    marzban_username=referrer.marzban_username,
+                                    extra_days=bonus_days,
+                                    tier=referrer.tier
+                                )
+                            except Exception as e:
+                                logger.error(f"Ошибка начисления бонусных дней в Marzban для {referrer.user_id}: {e}")
+                                
+                        bonus_days_msg = f"\n🎁 <b>Бонус за {referrer.refs_paid_count}-го друга:</b> +{bonus_days} дней VPN!"
+                # ======================================================
+
+                referrers_bonuses.append({
+                    'level': level,
+                    'id': referrer.user_id,
+                    'username': referrer.username,
+                    'bonus': bonus
+                })
+
+                # Уведомляем рефовода
+                try:
+                    await bot.send_message(
+                        referrer.user_id,
+                        f"💸 <b>Реферальное начисление!</b>\n\n"
+                        f"Ваш реферал (ID: {user_telegram_id}) пополнил баланс криптовалютой.\n"
+                        f"Вам начислено: <b>+{bonus:.2f}₽</b> ({level} уровень, {pct}%){bonus_days_msg}\n\n"
+                        f"Реферальный баланс: {referrer.referral_balance:.2f}₽",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to notify referrer {referrer.user_id}: {e}")
+
+                current_referrer_id = referrer.referrer_id
+        except Exception as e:
+            logger.error(f"Ошибка при начислении реферальных: {e}")
+
+        # Фиксируем изменения
+        await session.commit()
+
+        # === УВЕДОМЛЕНИЕ ПОЛЬЗОВАТЕЛЯ ===
+        try:
+            subscription_info = ""
+            if user.marzban_username:
+                subscription_info = f"\n\n🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
+            tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+
             await bot.send_message(
-                user.user_id,
-                f"✅ Подписка успешно продлена на {days} дней!"
+                user_telegram_id,
+                f"✅ <b>Оплата криптовалютой прошла успешно!</b>\n\n"
+                f"💎 Тариф: <b>{tier_name}</b>\n"
+                f"⏳ Подписка: <b>{days} дней</b>\n"
+                f"💰 Сумма: <b>{amount:.2f} RUB</b> (в эквиваленте)\n"
+                f"{subscription_info}\n"
+                f"Спасибо за покупку! 🎉",
+                parse_mode="HTML"
             )
         except Exception as e:
-            logger.warning(f"Не удалось отправить уведомление пользователю: {e}")
-    
-    except Exception as e:
-        logger.error(f"Ошибка выдачи подписки: {e}")
-        raise
+            logger.error(f"Failed to notify user {user_telegram_id}: {e}")
+
+        # === УВЕДОМЛЕНИЕ АДМИНОВ ===
+        try:
+            user_display = f" @{user.username}" if user.username else f"ID: {user_telegram_id}"
+            referrer_line = "\n👥 Рефовод: Нет"
+            if referrers_bonuses:
+                ref_info = referrers_bonuses[0]
+                ref_link = f" @{ref_info['username']}" if ref_info['username'] else f"ID: {ref_info['id']}"
+                referrer_line = f"\n👥 Рефовод: {ref_link} (+{ref_info['bonus']:.2f}₽)"
+
+            admin_msg = (
+                f"🪙 <b>Новое пополнение! (CryptoPay)</b>\n\n"
+                f"🆔 ID: <code>{user_telegram_id}</code>\n"
+                f"👤 Профиль: {user_display}\n"
+                f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
+                f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>"
+                f"{referrer_line}"
+            )
+
+            for admin_id in settings.admin_ids_list:
+                try:
+                    await bot.send_message(admin_id, admin_msg, parse_mode="HTML")
+                except Exception as e:
+                    logger.warning(f"Failed to notify admin {admin_id}: {e}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке уведомления админу: {e}")
+
+        return True

@@ -2,6 +2,7 @@
 Обработчик webhook'ов Platega для автоматической выдачи подписок.
 Работает по аналогии с успешными проектами.
 """
+
 import json
 from aiogram import Bot
 from loguru import logger
@@ -17,9 +18,7 @@ from database.engine import get_session_factory
 
 
 async def handle_platega_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[str, str]:
-    """
-    Обработать обновление от Platega webhook.
-    """
+    """Обработать обновление от Platega webhook."""
     logger.info("=" * 50)
     logger.info("💰 PLATEGA WEBHOOK получен")
     logger.info("=" * 50)
@@ -69,7 +68,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
 
     # Парсим order_id: формат "platega_{user_id}_{uuid}"
     parts = str(order_id).split("_")
-    
+
     if len(parts) < 3:
         logger.error(f"Invalid order_id format: {order_id}")
         return False
@@ -102,7 +101,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
         # Получаем days и tier из payload инвойса
         days = 30  # По умолчанию
         tier = "standard"  # НОВОЕ: по умолчанию обычный тариф
-        
+
         if invoice and invoice.payload:
             try:
                 payload_data = json.loads(invoice.payload)
@@ -150,6 +149,16 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 created_at=datetime.utcnow()
             )
             session.add(invoice)
+
+        # === НОВОЕ: Проверяем, первая ли это оплата (до добавления транзакции) ===
+        prev_paid_tx = await session.execute(
+            select(Transaction)
+            .where(Transaction.user_id == user_telegram_id)
+            .where(Transaction.status == "paid")
+            .limit(1)
+        )
+        is_first_payment = prev_paid_tx.scalar_one_or_none() is None
+        # =========================================================================
 
         # Создаем транзакцию
         transaction = Transaction(
@@ -235,6 +244,42 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
 
                 bonus = float(amount) * (pct / 100.0)
                 referrer.referral_balance += bonus
+                
+                # === НОВАЯ ЛОГИКА ДЛЯ ЗАДАНИЙ (Только для 1 уровня) ===
+                bonus_days_msg = ""
+                if level == 1 and is_first_payment:
+                    referrer.refs_paid_count += 1
+                    bonus_days = 0
+                    
+                    # Мотивационная лесенка дней
+                    if referrer.refs_paid_count == 1:
+                        bonus_days = 5
+                    elif referrer.refs_paid_count == 5:
+                        bonus_days = 14
+                    elif referrer.refs_paid_count == 10:
+                        bonus_days = 30
+                        
+                    if bonus_days > 0:
+                        # Продлеваем подписку рефоводу
+                        ref_now = datetime.utcnow()
+                        if referrer.expire_date and referrer.expire_date > ref_now:
+                            referrer.expire_date += timedelta(days=bonus_days)
+                        else:
+                            referrer.expire_date = ref_now + timedelta(days=bonus_days)
+                            
+                        # Продлеваем в Marzban
+                        if referrer.marzban_username:
+                            try:
+                                await marzban_service.update_user_expiry(
+                                    marzban_username=referrer.marzban_username,
+                                    extra_days=bonus_days,
+                                    tier=referrer.tier
+                                )
+                            except Exception as e:
+                                logger.error(f"Ошибка начисления бонусных дней в Marzban для {referrer.user_id}: {e}")
+                                
+                        bonus_days_msg = f"\n🎁 <b>Бонус за {referrer.refs_paid_count}-го друга:</b> +{bonus_days} дней VPN!"
+                # ======================================================
 
                 referrers_bonuses.append({
                     'level': level,
@@ -249,7 +294,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                         referrer.user_id,
                         f"💸 <b>Реферальное начисление!</b>\n\n"
                         f"Ваш реферал (ID: {user_telegram_id}) пополнил баланс.\n"
-                        f"Вам начислено: <b>+{bonus:.2f}₽</b> ({level} уровень, {pct}%)\n\n"
+                        f"Вам начислено: <b>+{bonus:.2f}₽</b> ({level} уровень, {pct}%){bonus_days_msg}\n\n"
                         f"Реферальный баланс: {referrer.referral_balance:.2f}₽",
                         parse_mode="HTML"
                     )
@@ -269,7 +314,6 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             subscription_info = ""
             if user.marzban_username:
                 subscription_info = f"\n\n🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
-
             tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
 
             await bot.send_message(
@@ -289,7 +333,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
         # === УВЕДОМЛЕНИЕ АДМИНОВ ===
         try:
             user_display = f" @{user.username}" if user.username else f"ID: {user_telegram_id}"
-            
+
             referrer_line = "\n👥 Рефовод: Нет"
             if referrers_bonuses:
                 ref_info = referrers_bonuses[0]
