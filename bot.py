@@ -50,8 +50,8 @@ from handlers.referrals import router as referrals_router
 from services.crypto_bot_v2 import crypto_bot_v2_service
 from services.crypto_webhook import handle_crypto_webhook_update
 
-# Импортируем вебхук-сервер для Platega
-from utils.webhook_server import webhook_server
+# Импортируем вебхук-сервер для Platega и Mini App
+from utils.webhook_server import run_webhooks
 
 
 async def update_trial_command_for_user(user_id: int, has_active_subscription: bool):
@@ -240,8 +240,8 @@ async def on_startup():
     await update_trial_commands_for_all_users()
     logger.info("Команды /trial обновлены для всех пользователей")
 
-    # Запускаем вебхук-сервер для Platega
-    await webhook_server.start(bot)
+    # Запускаем обновленный вебхук-сервер
+    await run_webhooks(bot)
     logger.info("Вебхук-сервер запущен")
 
 
@@ -254,10 +254,6 @@ async def on_shutdown():
     if scheduler:
         await scheduler.stop()
         logger.info("Планировщик остановлен")
-
-    # Остановка вебхук-сервера
-    # Note: runner сохраняется в webhook_server как свойство, но мы используем глобальный экземпляр
-    # Остановка выполняется через asyncio.create_task
 
     # Закрытие соединений
     await marzban_service.close()
@@ -283,8 +279,6 @@ async def main():
         pass
     finally:
         await on_shutdown()
-        # Остановка вебхук-сервера
-        await webhook_server.stop(getattr(webhook_server, 'runner', None))
 
 
 if __name__ == "__main__":
