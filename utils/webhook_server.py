@@ -237,10 +237,11 @@ class WebhookHandler:
             days = int(data.get("days", 30))
             tier = data.get("tier", "premium") 
             device_count = int(data.get("device_count", 1))
+            gb_limit = float(data.get("gb_limit", 0))
             amount = float(data.get("amount", 300))
             payment_method = data.get("payment_method", "cryptopay")
             
-            logger.info(f"💳 Создание счета для {tg_id} через {payment_method} на {amount} руб. Устройств: {device_count}")
+            logger.info(f"💳 Создание счета для {tg_id} через {payment_method} на {amount} руб. Устройств: {device_count}, Лимит: {gb_limit} ГБ")
 
             pay_url = None
             final_invoice_id = ""
@@ -263,7 +264,8 @@ class WebhookHandler:
                     payload=json.dumps({
                         "days": days, 
                         "tier": tier, 
-                        "device_count": device_count
+                        "device_count": device_count,
+                        "gb_limit": gb_limit
                     }),
                     created_at=datetime.utcnow()
                 )
@@ -397,16 +399,16 @@ class WebhookHandler:
                 
                 # Обновляем Marzban
                 try:
+                    gb_limit_val = user.gb_limit or 0
                     if user.marzban_username:
                         marzban_data = await marzban_service.get_user(user.marzban_username)
                         if marzban_data:
-                            await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier)
-                            await marzban_service.update_user_ip_limit(user.marzban_username, device_count)
+                            await marzban_service.update_user_full(user.marzban_username, extra_days=days, tier=tier, device_count=device_count, data_limit_gb=gb_limit_val)
                         else:
-                            new_acc = await marzban_service.create_user(tg_id, user.username, days, data_limit_gb=0.0, tier=tier, device_count=device_count)
+                            new_acc = await marzban_service.create_user(tg_id, user.username, days, data_limit_gb=gb_limit_val, tier=tier, device_count=device_count)
                             user.marzban_username = new_acc.get('username')
                     else:
-                        new_acc = await marzban_service.create_user(tg_id, user.username, days, data_limit_gb=0.0, tier=tier, device_count=device_count)
+                        new_acc = await marzban_service.create_user(tg_id, user.username, days, data_limit_gb=gb_limit_val, tier=tier, device_count=device_count)
                         user.marzban_username = new_acc.get('username')
                 except Exception as e:
                     logger.error(f"Ошибка Marzban при оплате с баланса: {e}")
