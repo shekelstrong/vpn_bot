@@ -12,7 +12,7 @@ from decimal import Decimal
 from config import settings
 from database.models import User, PaymentInvoice, Transaction
 from services.marzban_api import marzban_service
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from database.engine import get_session_factory
 
 
@@ -20,6 +20,7 @@ async def handle_crypto_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[s
     """Обработать обновление от CryptoPay webhook."""
     logger.info("=" * 50)
     logger.info("🪙 CRYPTO WEBHOOK получен")
+    logger.info(f"📦 RAW DATA: {json.dumps(data, default=str, ensure_ascii=False)}")
     logger.info("=" * 50)
     
     try:
@@ -42,12 +43,34 @@ async def handle_crypto_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[s
         fiat_amount = Decimal(str(payload.get("fiat_amount", 0)))
         fiat_currency = payload.get("fiat_currency", "RUB")
         
-        # Мы используем payload, который мы передавали при создании (в CryptoPay это hidden_message или payload, 
-        # но надежнее брать наш invoice_id и искать по нему в БД)
-        order_id = payload.get("payload") or invoice_id
+        # payload.payload — это то, что мы передали при создании инвойса.
+        # В старом API (payment_crypto.py) это числовой ID инвойса из нашей БД.
+        # В v2 API (crypto_bot_v2.py) это JSON-строка с user_id и days.
+        raw_payload = payload.get("payload")
+        logger.info(f"  raw_payload из CryptoBot: {raw_payload!r} (type: {type(raw_payload).__name__})")
+
+        # Определяем order_id для поиска в БД
+        order_id = None
+        if raw_payload:
+            # Пробуем распарсить как JSON (от v2 API)
+            try:
+                parsed = json.loads(str(raw_payload))
+                if isinstance(parsed, dict) and "user_id" in parsed:
+                    # Это от v2 API — ищем по user_id
+                    logger.info(f"  Определён формат v2 API: user_id={parsed['user_id']}")
+                    # Для v2 ищем инвойс по CryptoBot invoice_id
+                    order_id = invoice_id
+                else:
+                    order_id = str(raw_payload)
+            except (json.JSONDecodeError, TypeError):
+                order_id = str(raw_payload)
+
+        if not order_id:
+            order_id = invoice_id
 
         logger.info(f"Платеж CryptoPay:")
-        logger.info(f"  Invoice ID / Order ID: {order_id}")
+        logger.info(f"  CryptoBot Invoice ID: {invoice_id}")
+        logger.info(f"  Order ID (для поиска в БД): {order_id}")
         logger.info(f"  Amount: {amount} {asset} (~{fiat_amount} {fiat_currency})")
         logger.info(f"  Status: {status}")
 
@@ -56,9 +79,15 @@ async def handle_crypto_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[s
             return {"status": "error", "message": "Отсутствует order_id"}
 
         # В качестве суммы зачисления используем фиатный эквивалент (в рублях)
-        process_amount = fiat_amount if fiat_amount > 0 else amount
+        # Если fiat_amount = 0, пересчитываем по курсу из настроек
+        if fiat_amount > 0:
+            process_amount = fiat_amount
+        else:
+            rate = getattr(settings, 'USDT_TO_RUB_RATE', 95.0)
+            process_amount = amount * Decimal(str(rate))
+            logger.info(f"  fiat_amount=0, пересчёт: {amount} USDT × {rate} = {process_amount} RUB")
 
-        result = await process_crypto_payment(order_id, process_amount, bot)
+        result = await process_crypto_payment(order_id, invoice_id, process_amount, bot)
 
         return {"status": "ok", "message": "Подписка выдана"}
 
@@ -69,21 +98,73 @@ async def handle_crypto_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[s
         return {"status": "error", "message": str(e)}
 
 
-async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bool:
+async def _find_invoice(session, order_id: str, cryptobot_invoice_id: str) -> Optional[PaymentInvoice]:
+    """
+    Надёжный поиск инвойса в БД с несколькими fallback-стратегиями.
+    """
+    # Стратегия 1: точное совпадение по invoice_id (наш внутренний ID)
+    result = await session.execute(
+        select(PaymentInvoice).where(PaymentInvoice.invoice_id == str(order_id))
+    )
+    invoice = result.scalar_one_or_none()
+    if invoice:
+        logger.info(f"  Инвойс найден по invoice_id={order_id}")
+        return invoice
+
+    # Стратегия 2: поиск по CryptoBot invoice_id (если payment_crypto перезаписал ID)
+    if cryptobot_invoice_id and cryptobot_invoice_id != order_id:
+        result = await session.execute(
+            select(PaymentInvoice).where(PaymentInvoice.invoice_id == str(cryptobot_invoice_id))
+        )
+        invoice = result.scalar_one_or_none()
+        if invoice:
+            logger.info(f"  Инвойс найден по CryptoBot invoice_id={cryptobot_invoice_id}")
+            return invoice
+
+    # Стратегия 3: поиск последнего pending-инвойса по payload, содержащему order_id
+    result = await session.execute(
+        select(PaymentInvoice)
+        .where(PaymentInvoice.status == "pending")
+        .where(PaymentInvoice.payment_method == "cryptopay")
+        .order_by(PaymentInvoice.created_at.desc())
+        .limit(10)
+    )
+    pending_invoices = result.scalars().all()
+    for inv in pending_invoices:
+        # Проверяем, что payload содержит наш order_id
+        if inv.payload and str(order_id) in str(inv.payload):
+            logger.info(f"  Инвойс найден по payload-поиску: id={inv.id}, invoice_id={inv.invoice_id}")
+            return inv
+
+    # Стратегия 4: поиск по ID как числу (если order_id — числовой)
+    try:
+        numeric_id = int(order_id)
+        result = await session.execute(
+            select(PaymentInvoice).where(PaymentInvoice.id == numeric_id)
+        )
+        invoice = result.scalar_one_or_none()
+        if invoice:
+            logger.info(f"  Инвойс найден по числовому ID={numeric_id}")
+            return invoice
+    except (ValueError, TypeError):
+        pass
+
+    logger.error(f"  Инвойс НЕ НАЙДЕН: order_id={order_id}, cryptobot_id={cryptobot_invoice_id}")
+    return None
+
+
+async def process_crypto_payment(order_id: str, cryptobot_invoice_id: str, amount: Decimal, bot: Bot) -> bool:
     """
     Единая функция обработки криптовалютного платежа.
     """
-    logger.info(f"🔄 Обработка крипто-платежа order_id={order_id}, amount={amount} RUB")
+    logger.info(f"🔄 Обработка крипто-платежа order_id={order_id}, cryptobot_id={cryptobot_invoice_id}, amount={amount} RUB")
 
     async with get_session_factory()() as session:
-        # Ищем инвойс в нашей БД
-        existing = await session.execute(
-            select(PaymentInvoice).where(PaymentInvoice.invoice_id == str(order_id))
-        )
-        invoice = existing.scalar_one_or_none()
+        # Ищем инвойс в нашей БД (надёжный поиск с fallback'ами)
+        invoice = await _find_invoice(session, order_id, cryptobot_invoice_id)
 
         if not invoice:
-            logger.error(f"Invoice not found in DB: {order_id}")
+            logger.error(f"Invoice not found in DB: order_id={order_id}, cryptobot_id={cryptobot_invoice_id}")
             return False
 
         user_telegram_id = invoice.user_id
@@ -96,10 +177,11 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
             logger.error(f"User not found: {user_telegram_id}")
             return False
 
-        # Получаем days, tier и device_count из payload инвойса
+        # Получаем days, tier, device_count и gb_limit из payload инвойса
         days = 30
         tier = "standard"
         device_count = 1
+        gb_limit = 0
 
         if invoice.payload:
             try:
@@ -107,21 +189,22 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
                 days = payload_data.get("days", 30)
                 tier = payload_data.get("tier", "standard")
                 device_count = payload_data.get("device_count", 1)
+                gb_limit = payload_data.get("gb_limit", 0)
             except Exception as e:
                 logger.warning(f"Failed to parse invoice payload: {e}")
 
-        logger.info(f"Crypto Payment: user={user_telegram_id}, days={days}, tier={tier}, devices={device_count}, amount={amount}")
+        logger.info(f"Crypto Payment: user={user_telegram_id}, days={days}, tier={tier}, devices={device_count}, gb_limit={gb_limit} GB, amount={amount}")
 
         # Проверяем, есть ли уже оплаченный инвойс
         if invoice.status == "paid":
-            logger.info(f"Payment already processed: {order_id}")
+            logger.info(f"Payment already processed: {invoice.invoice_id}")
             return True
 
         # Обновляем инвойс
         invoice.status = "paid"
         invoice.device_count = device_count
 
-        # === НОВОЕ: Проверяем, первая ли это оплата (до добавления транзакции) ===
+        # === Проверяем, первая ли это оплата (до добавления транзакции) ===
         prev_paid_tx = await session.execute(
             select(Transaction)
             .where(Transaction.user_id == user_telegram_id)
@@ -129,7 +212,6 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
             .limit(1)
         )
         is_first_payment = prev_paid_tx.scalar_one_or_none() is None
-        # =========================================================================
 
         # Создаем транзакцию
         transaction = Transaction(
@@ -154,47 +236,48 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
             user.expire_date = now + timedelta(days=days)
             logger.info(f"Новая подписка до {user.expire_date}")
 
-        # Обновляем тариф и количество устройств пользователя в базе данных
+        # Обновляем тариф, количество устройств и лимит трафика
         user.tier = tier
         user.device_count = device_count
+        if gb_limit > 0:
+            user.gb_limit = gb_limit
 
         # === MARZBAN ===
         try:
             if user.marzban_username:
-                # Проверяем существование в Marzban
                 marzban_user = await marzban_service.get_user(user.marzban_username)
                 if marzban_user:
-                    await marzban_service.update_user_expiry(
+                    # Один запрос — обновляем всё разом (срок + тариф + устройства + трафик)
+                    await marzban_service.update_user_full(
                         marzban_username=user.marzban_username,
                         extra_days=days,
-                        tier=tier
+                        tier=tier,
+                        device_count=device_count,
+                        data_limit_gb=gb_limit
                     )
-                    logger.info(f"✅ Marzban: подписка {user.marzban_username} продлена на {days} дней (Тариф: {tier})")
+                    logger.info(f"✅ Marzban: {user.marzban_username} обновлён (+{days}д, {tier}, {device_count} устр., {gb_limit} ГБ)")
                 else:
                     new_user = await marzban_service.create_user(
                         tg_id=user_telegram_id,
                         username=user.username,
                         expire_days=days,
-                        data_limit_gb=0.0,
+                        data_limit_gb=gb_limit,
                         tier=tier,
                         device_count=device_count
                     )
                     user.marzban_username = new_user.get("username")
-                    logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
+                    logger.info(f"✅ Marzban: создан {user.marzban_username} (Тариф: {tier})")
             else:
                 new_user = await marzban_service.create_user(
                     tg_id=user_telegram_id,
                     username=user.username,
                     expire_days=days,
-                    data_limit_gb=0.0,
+                    data_limit_gb=gb_limit,
                     tier=tier,
                     device_count=device_count
                 )
                 user.marzban_username = new_user.get("username")
-                logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
-                
-            # Принудительно синхронизируем лимит устройств с Marzban
-            await marzban_service.update_user_ip_limit(user.marzban_username, device_count)
+                logger.info(f"✅ Marzban: создан {user.marzban_username} (Тариф: {tier})")
             
         except Exception as e:
             logger.error(f"❌ Marzban error: {e}")
@@ -220,13 +303,12 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
                 bonus = float(amount) * (pct / 100.0)
                 referrer.referral_balance += bonus
                 
-                # === НОВАЯ ЛОГИКА ДЛЯ ЗАДАНИЙ (Только для 1 уровня) ===
+                # Логика для заданий (только для 1 уровня)
                 bonus_days_msg = ""
                 if level == 1 and is_first_payment:
                     referrer.refs_paid_count += 1
                     bonus_days = 0
                     
-                    # Мотивационная лесенка дней
                     if referrer.refs_paid_count == 1:
                         bonus_days = 5
                     elif referrer.refs_paid_count == 5:
@@ -241,7 +323,6 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
                         else:
                             referrer.expire_date = ref_now + timedelta(days=bonus_days)
                             
-                        # Продлеваем в Marzban
                         if referrer.marzban_username:
                             try:
                                 await marzban_service.update_user_expiry(
@@ -253,7 +334,6 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
                                 logger.error(f"Ошибка начисления бонусных дней в Marzban для {referrer.user_id}: {e}")
                                 
                         bonus_days_msg = f"\n🎁 <b>Бонус за {referrer.refs_paid_count}-го друга:</b> +{bonus_days} дней VPN!"
-                # ======================================================
 
                 referrers_bonuses.append({
                     'level': level,
@@ -340,8 +420,8 @@ async def process_crypto_payment(order_id: str, amount: Decimal, bot: Bot) -> bo
                 f"👤 Профиль: {user_display}\n"
                 f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
                 f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>\n"
-                f"📱 Устройств: <b>{user.device_count}</b>"
-                f"{referrer_line}"
+                f"📱 Устройств: <b>{user.device_count}"
+                f"</b>{referrer_line}"
             )
 
             for admin_id in settings.admin_ids_list:
