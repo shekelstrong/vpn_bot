@@ -146,14 +146,16 @@ class WebhookHandler:
                 tg_user_id = payment_invoice.user_id
                 days = 30
                 tier = "standard"  # По умолчанию обычный тариф
-                device_count = 1   # НОВОЕ: Устройства
+                device_count = 1
+                gb_limit = 0
 
                 if payment_invoice.payload:
                     try:
                         payload = json.loads(payment_invoice.payload)
                         days = payload.get("days", 30)
                         tier = payload.get("tier", "standard")
-                        device_count = payload.get("device_count", 1)  # Извлекаем устройства
+                        device_count = payload.get("device_count", 1)
+                        gb_limit = payload.get("gb_limit", 0)
                     except:
                         pass
 
@@ -165,7 +167,8 @@ class WebhookHandler:
                     payment_id=str(invoice_id),
                     days=days,
                     tier=tier,  
-                    device_count=device_count  # Передаем лимит устройств
+                    device_count=device_count,
+                    gb_limit=gb_limit
                 )
 
                 return web.json_response({"status": "ok"})
@@ -224,7 +227,8 @@ class WebhookHandler:
         payment_id: str,
         days: int = 30,
         tier: str = "standard",
-        device_count: int = 1  # НОВОЕ: Добавлен лимит устройств
+        device_count: int = 1,
+        gb_limit: float = 0
     ):
         """Обработка успешного платежа и распределение реферальных бонусов."""
         from aiogram import Bot
@@ -269,6 +273,8 @@ class WebhookHandler:
                 # НОВОЕ: Сохраняем тариф и лимит устройств пользователю
                 user.tier = tier
                 user.device_count = device_count
+                if gb_limit > 0:
+                    user.gb_limit = gb_limit
 
                 # 5. РЕФЕРАЛЬНАЯ ЛОГИКА (3 уровня)
                 referrers_bonuses = []
@@ -315,24 +321,23 @@ class WebhookHandler:
                     except: pass
 
                 if marzban_account_exists:
-                    await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier)
+                    await marzban_service.update_user_full(
+                        marzban_username=user.marzban_username,
+                        extra_days=days,
+                        tier=tier,
+                        device_count=device_count,
+                        data_limit_gb=gb_limit
+                    )
                 else:
                     new_acc = await marzban_service.create_user(
                         tg_id=tg_user_id,
                         username=user.username,
                         expire_days=days,
-                        data_limit_gb=0.0,
+                        data_limit_gb=gb_limit,
                         tier=tier,
                         device_count=device_count
                     )
                     user.marzban_username = new_acc.get('username')
-                
-                # НОВОЕ: Синхронизируем лимиты устройств с Marzban
-                if user.marzban_username:
-                    try:
-                        await marzban_service.update_user_ip_limit(user.marzban_username, device_count)
-                    except Exception as e:
-                        logger.error(f"Ошибка при обновлении лимита устройств в Marzban: {e}")
 
                 await session.commit()
                 logger.info(f"Payment processed and bonuses distributed for user {tg_user_id} (Тариф: {tier})")
