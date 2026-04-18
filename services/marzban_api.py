@@ -166,7 +166,7 @@ class MarzbanService:
             "expire": int(expire_date.timestamp()),
             "data_limit": data_limit_bytes if data_limit_bytes > 0 else None,
             "status": "active",
-            "onlines_limit": device_count  # НОВОЕ: Устанавливаем лимит IP (в Marzban это onlines_limit)
+            "ip_limit": device_count
         }
 
         try:
@@ -251,13 +251,14 @@ class MarzbanService:
             raise
 
     async def update_user_ip_limit(self, marzban_username: str, device_count: int) -> Dict[str, Any]:
-        """НОВОЕ: Обновить лимит устройств (ip_limit) пользователя в Marzban."""
+        """Обновить лимит устройств (ip_limit) пользователя в Marzban.
+        ip_limit ограничивает количество уникальных IP-адресов, с которых можно подключаться."""
         update_data = {
-            "onlines_limit": device_count
+            "ip_limit": device_count
         }
         try:
             result = await self._request("PUT", f"/user/{marzban_username}", json=update_data)
-            logger.info(f"Синхронизирован лимит устройств для {marzban_username}: {device_count}")
+            logger.info(f"Синхронизирован лимит устройств (ip_limit) для {marzban_username}: {device_count}")
             return result
         except Exception as e:
             logger.error(f"Ошибка обновления лимита устройств {marzban_username}: {e}")
@@ -280,6 +281,62 @@ class MarzbanService:
             return result
         except Exception as e:
             logger.error(f"Ошибка обновления лимита трафика {marzban_username}: {e}")
+            raise
+
+    async def update_user_full(
+        self,
+        marzban_username: str,
+        extra_days: int = 0,
+        tier: str = "standard",
+        device_count: int = 0,
+        data_limit_gb: float = 0
+    ) -> Dict[str, Any]:
+        """Обновить пользователя одним запросом: срок + тариф + устройства + трафик.
+        Используется при оплате, чтобы не перегенерировать sub URL."""
+        user = await self.get_user(marzban_username)
+        if not user:
+            raise ValueError(f"Пользователь {marzban_username} не найден")
+
+        current_expire = user.get("expire") or 0
+        current_time = int(datetime.utcnow().timestamp())
+        if extra_days > 0:
+            if current_expire > current_time:
+                new_expire = current_expire + (extra_days * 24 * 60 * 60)
+            else:
+                new_expire = current_time + (extra_days * 24 * 60 * 60)
+        else:
+            new_expire = current_expire
+
+        if tier == "premium":
+            proxies = {"vless": {"flow": "xtls-rprx-vision"}}
+            inbounds = {"vless": ["vless-reality-whitelist"]}
+        else:
+            proxies = {"vless": {"flow": ""}}
+            inbounds = {"vless": ["vless-reality-standard"]}
+
+        data_limit_bytes = int(data_limit_gb * 1024 * 1024 * 1024) if data_limit_gb > 0 else None
+
+        update_data = {
+            "expire": new_expire,
+            "status": "active",
+            "proxies": proxies,
+            "inbounds": inbounds,
+        }
+        if device_count > 0:
+            update_data["ip_limit"] = device_count
+        if data_limit_bytes is not None:
+            update_data["data_limit"] = data_limit_bytes
+
+        try:
+            result = await self._request("PUT", f"/user/{marzban_username}", json=update_data)
+            try:
+                await self.reset_user_traffic(marzban_username)
+            except Exception:
+                pass
+            logger.info(f"Полное обновление {marzban_username}: +{extra_days}д, {tier}, {device_count} устр., {data_limit_gb} ГБ")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка полного обновления {marzban_username}: {e}")
             raise
 
     async def delete_user(self, marzban_username: str) -> None:
