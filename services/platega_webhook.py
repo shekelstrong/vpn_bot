@@ -101,14 +101,16 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
         # Получаем данные из payload инвойса
         days = 30  # По умолчанию
         tier = "standard"  # По умолчанию обычный тариф
-        device_count = 1   # НОВОЕ: Лимит устройств по умолчанию
+        device_count = 1   # Лимит устройств по умолчанию
+        gb_limit = 0       # Лимит трафика по умолчанию
 
         if invoice and invoice.payload:
             try:
                 payload_data = json.loads(invoice.payload)
                 days = payload_data.get("days", 30)
                 tier = payload_data.get("tier", "standard")
-                device_count = payload_data.get("device_count", 1)  # НОВОЕ: Извлекаем устройства
+                device_count = payload_data.get("device_count", 1)
+                gb_limit = payload_data.get("gb_limit", 0)
             except Exception as e:
                 logger.warning(f"Failed to parse invoice payload: {e}")
         else:
@@ -127,6 +129,7 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                     days = payload_data.get("days", 30)
                     tier = payload_data.get("tier", "standard")
                     device_count = payload_data.get("device_count", 1)
+                    gb_limit = payload_data.get("gb_limit", 0)
                 except Exception as e:
                     logger.warning(f"Failed to parse recent invoice payload: {e}")
 
@@ -187,53 +190,50 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             user.expire_date = now + timedelta(days=days)
             logger.info(f"Новая подписка до {user.expire_date}")
 
-        # Обновляем тариф и количество устройств пользователя в базе данных
+        # Обновляем тариф, количество устройств и лимит трафика
         user.tier = tier
-        user.device_count = device_count # НОВОЕ: Применяем лимит
+        user.device_count = device_count
+        if gb_limit > 0:
+            user.gb_limit = gb_limit
 
         # === MARZBAN ===
         try:
             if user.marzban_username:
-                # Проверяем существование в Marzban
                 marzban_user = await marzban_service.get_user(user.marzban_username)
                 if marzban_user:
-                    await marzban_service.update_user_expiry(
+                    await marzban_service.update_user_full(
                         marzban_username=user.marzban_username,
                         extra_days=days,
-                        tier=tier  # Передаем тариф для правильного инбаунда
+                        tier=tier,
+                        device_count=device_count,
+                        data_limit_gb=gb_limit
                     )
-                    logger.info(f"✅ Marzban: подписка {user.marzban_username} продлена на {days} дней (Тариф: {tier})")
+                    logger.info(f"✅ Marzban: {user.marzban_username} обновлён (+{days}д, {tier}, {device_count} устр., {gb_limit} ГБ)")
                 else:
-                    # Создаем нового
                     new_user = await marzban_service.create_user(
                         tg_id=user_telegram_id,
                         username=user.username,
                         expire_days=days,
-                        data_limit_gb=0.0,
+                        data_limit_gb=gb_limit,
                         tier=tier,
                         device_count=device_count
                     )
                     user.marzban_username = new_user.get("username")
-                    logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
+                    logger.info(f"✅ Marzban: создан {user.marzban_username} (Тариф: {tier})")
             else:
-                # Создаем нового
                 new_user = await marzban_service.create_user(
                     tg_id=user_telegram_id,
                     username=user.username,
                     expire_days=days,
-                    data_limit_gb=0.0,
+                    data_limit_gb=gb_limit,
                     tier=tier,
                     device_count=device_count
                 )
                 user.marzban_username = new_user.get("username")
-                logger.info(f"✅ Marzban: создан пользователь {user.marzban_username} (Тариф: {tier})")
-            
-            # НОВОЕ: Принудительно синхронизируем лимит устройств с Marzban
-            await marzban_service.update_user_ip_limit(user.marzban_username, device_count)
+                logger.info(f"✅ Marzban: создан {user.marzban_username} (Тариф: {tier})")
             
         except Exception as e:
             logger.error(f"❌ Marzban error: {e}")
-            # Не прерываем обработку, продолжаем с уведомлениями и сохранением в БД
 
         # === РЕФЕРАЛЬНЫЕ БОНУСЫ (3 уровня) ===
         referrers_bonuses = []
