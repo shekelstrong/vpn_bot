@@ -192,9 +192,12 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
 
         # Обновляем тариф, количество устройств и лимит трафика
         user.tier = tier
-        user.device_count = device_count
+        if device_count > 0:
+            user.device_count = device_count
         if gb_limit > 0:
-            user.gb_limit = gb_limit
+            current_gb = user.gb_limit or 0
+            user.gb_limit = current_gb + gb_limit
+            logger.info(f"GB лимит: {current_gb} + {gb_limit} = {user.gb_limit} ГБ")
 
         # === MARZBAN ===
         try:

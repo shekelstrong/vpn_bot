@@ -314,7 +314,15 @@ class MarzbanService:
             proxies = {"vless": {"flow": ""}}
             inbounds = {"vless": ["vless-reality-standard"]}
 
-        data_limit_bytes = int(data_limit_gb * 1024 * 1024 * 1024) if data_limit_gb > 0 else None
+        # Накопительный лимит: прибавляем GB к уже использованному трафику
+        current_data_limit = user.get("data_limit") or 0
+        current_used = user.get("used_traffic") or 0
+
+        if data_limit_gb > 0:
+            # Новый лимит = использованный трафик + новые GB
+            new_data_limit_bytes = int(current_used + data_limit_gb * 1024 * 1024 * 1024)
+        else:
+            new_data_limit_bytes = current_data_limit if current_data_limit > 0 else None
 
         update_data = {
             "expire": new_expire,
@@ -324,16 +332,13 @@ class MarzbanService:
         }
         if device_count > 0:
             update_data["ip_limit"] = device_count
-        if data_limit_bytes is not None:
-            update_data["data_limit"] = data_limit_bytes
+        if new_data_limit_bytes is not None:
+            update_data["data_limit"] = new_data_limit_bytes
 
         try:
             result = await self._request("PUT", f"/user/{marzban_username}", json=update_data)
-            try:
-                await self.reset_user_traffic(marzban_username)
-            except Exception:
-                pass
-            logger.info(f"Полное обновление {marzban_username}: +{extra_days}д, {tier}, {device_count} устр., {data_limit_gb} ГБ")
+            # НЕ сбрасываем трафик при продлении — лимит уже учитывает использованное
+            logger.info(f"Полное обновление {marzban_username}: +{extra_days}д, {tier}, {device_count} устр., {data_limit_gb} ГБ (использовано {current_used/1024**3:.1f} ГБ, новый лимит {new_data_limit_bytes/1024**3:.1f} ГБ)")
             return result
         except Exception as e:
             logger.error(f"Ошибка полного обновления {marzban_username}: {e}")
