@@ -63,7 +63,7 @@ async def traffic_buy_callback(callback: types.CallbackQuery, session: AsyncSess
     )
 
 
-@router.callback_query(F.data.startswith("traffic_"))
+@router.callback_query(F.data.startswith("traffic_") & ~F.data.endswith("buy"))
 async def traffic_select_package(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     """Обработка выбора пакета трафика."""
     await callback.answer()
@@ -110,7 +110,7 @@ async def gift_start_callback(callback: types.CallbackQuery, session: AsyncSessi
     )
 
 
-@router.callback_query(F.data.startswith("gift_") and F.data not in ("gift_start",))
+@router.callback_query(F.data.in_({"gift_standard", "gift_premium"}))
 async def gift_select_tier(callback: types.CallbackQuery, state: FSMContext):
     """Выбор тарифа для подарка."""
     await callback.answer()
