@@ -14,7 +14,6 @@ class User(Base):
     """Модель пользователя Telegram / VK."""
     __tablename__ = "users"
 
-    # Главный ID (для TG это TG ID, для VK это 2 триллиона + VK ID)
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     
     vk_id: Mapped[Optional[int]] = mapped_column(BigInteger, unique=True, nullable=True)
@@ -31,37 +30,25 @@ class User(Base):
     last_notified_step: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     tier: Mapped[str] = mapped_column(String(50), default="standard")
     
-    # === НОВЫЕ ПОЛЯ ДЛЯ MINI APP И ЗАДАНИЙ ===
     device_count: Mapped[int] = mapped_column(Integer, default=1)
-    gb_limit: Mapped[Optional[float]] = mapped_column(Float, nullable=True) # None = безлимитный трафик (для старых пользователей)
-    task_channel_sub: Mapped[bool] = mapped_column(Boolean, default=False) # Выполнено ли задание подписки на канал
-    refs_paid_count: Mapped[int] = mapped_column(Integer, default=0) # Количество рефералов, совершивших покупку
-    # =========================================
+    gb_limit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    task_channel_sub: Mapped[bool] = mapped_column(Boolean, default=False)
+    refs_paid_count: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Связи
     referrer: Mapped[Optional["User"]] = relationship(
-        "User",
-        back_populates="referrals",
-        remote_side=[user_id],
-        foreign_keys=[referrer_id]
+        "User", back_populates="referrals", remote_side=[user_id], foreign_keys=[referrer_id]
     )
     referrals: Mapped[List["User"]] = relationship(
-        "User",
-        back_populates="referrer",
-        foreign_keys=[referrer_id]
+        "User", back_populates="referrer", foreign_keys=[referrer_id]
     )
     transactions: Mapped[List["Transaction"]] = relationship(
-        "Transaction",
-        back_populates="user",
-        cascade="all, delete-orphan"
+        "Transaction", back_populates="user", cascade="all, delete-orphan"
     )
     notifications: Mapped[List["Notification"]] = relationship(
-        "Notification",
-        back_populates="user",
-        cascade="all, delete-orphan"
+        "Notification", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
@@ -90,27 +77,20 @@ class Transaction(Base):
         UniqueConstraint("payment_id", name="uq_transaction_payment_id"),
     )
 
-    def __repr__(self) -> str:
-        return f"<Transaction(id={self.id}, user_id={self.user_id}, amount={self.amount}, status={self.status})>"
-
 class Notification(Base):
     """Модель отправленных уведомлений."""
     __tablename__ = "notifications"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id"), nullable=False)
-    
     notification_type: Mapped[str] = mapped_column(String(50), nullable=False)
     message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     sent_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped["User"] = relationship("User", back_populates="notifications")
 
-    def __repr__(self) -> str:
-        return f"<Notification(id={self.id}, user_id={self.user_id}, type={self.notification_type})>"
-
 class PaymentInvoice(Base):
-    """Модель счета на оплату (для отслеживания статусов)."""
+    """Модель счета на оплату."""
     __tablename__ = "payment_invoices"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -123,14 +103,9 @@ class PaymentInvoice(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending")
     payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    
-    # НОВОЕ: Количество устройств в этом инвойсе
     device_count: Mapped[int] = mapped_column(Integer, default=1)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    def __repr__(self) -> str:
-        return f"<PaymentInvoice(id={self.id}, invoice_id={self.invoice_id}, status={self.status})>"
 
 class BotSettings(Base):
     """Модель настроек бота."""
@@ -142,5 +117,22 @@ class BotSettings(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class GiftCode(Base):
+    """Модель подарочного кода."""
+    __tablename__ = "gift_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)  # UUID
+    creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tier: Mapped[str] = mapped_column(String(50), default="standard")
+    days: Mapped[int] = mapped_column(Integer, nullable=False)
+    gb_limit: Mapped[float] = mapped_column(Float, default=0)
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    used_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # 30 дней с создания
+
     def __repr__(self) -> str:
-        return f"<BotSettings(key={self.key}, value={self.value})>"
+        return f"<GiftCode(code={self.code}, tier={self.tier}, days={self.days}, is_used={self.is_used})>"

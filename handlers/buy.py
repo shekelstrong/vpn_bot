@@ -30,16 +30,16 @@ from utils.states import BuySubscription
 router = Router()
 
 async def process_manual_payment(bot, session: AsyncSession, payment_invoice: PaymentInvoice):
-    """Ручная обработка выдачи подписки, если вебхук потерялся по пути к серверу."""
+    """Ручная обработка выдачи подписки, если вебхук потерялся."""
     try:
         days = 30
-        tier = "standard" # По умолчанию обычный
+        tier = "standard"
         
         if payment_invoice.payload:
             try:
                 payload_data = json.loads(payment_invoice.payload)
                 days = payload_data.get("days", 30)
-                tier = payload_data.get("tier", "standard") # Извлекаем тариф из платежа
+                tier = payload_data.get("tier", "standard")
             except: pass
 
         result = await session.execute(select(User).where(User.user_id == payment_invoice.user_id))
@@ -65,7 +65,6 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
         else:
             user.expire_date = now + timedelta(days=days)
 
-        # Сохраняем тариф пользователю
         user.tier = tier
 
         marzban_account_exists = False
@@ -76,20 +75,15 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
                     marzban_account_exists = True
             except: pass
 
-        # Передаем tier в Marzban для правильной маршрутизации (Vision)
         if marzban_account_exists:
             await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier)
         else:
             new_acc = await marzban_service.create_user(
-                tg_id=user.user_id,
-                username=user.username,
-                expire_days=days,
-                data_limit_gb=0.0,
-                tier=tier
+                tg_id=user.user_id, username=user.username,
+                expire_days=days, data_limit_gb=0.0, tier=tier
             )
             user.marzban_username = new_acc.get('username')
 
-        # Реферальные начисления
         referrers_bonuses = []
         percentages = settings.referral_percentages_list
         current_referrer_id = user.referrer_id
@@ -102,24 +96,14 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
             
             bonus = payment_invoice.amount * (pct / 100)
             referrer.referral_balance += bonus
-            referrers_bonuses.append({
-                'level': level, 'id': referrer.user_id, 'username': referrer.username, 'bonus': bonus
-            })
+            referrers_bonuses.append({'level': level, 'id': referrer.user_id, 'username': referrer.username, 'bonus': bonus})
             
             await notify_referrer_payment(bot, referrer.user_id, user.user_id, bonus, level, user.username)
             current_referrer_id = referrer.referrer_id
 
         await session.commit()
 
-        await notify_user_purchase(
-            bot=bot,
-            user_id=user.user_id,
-            amount_rub=payment_invoice.amount,
-            duration_days=days,
-            is_extension=marzban_account_exists,
-            marzban_username=user.marzban_username
-        )
-
+        await notify_user_purchase(bot=bot, user_id=user.user_id, amount_rub=payment_invoice.amount, duration_days=days, is_extension=marzban_account_exists, marzban_username=user.marzban_username)
         await notify_admin_payment(bot, user.user_id, payment_invoice.amount, user.username, payment_invoice.payment_method, referrers_bonuses)
         logger.info(f"Ручная обработка платежа завершена для {user.user_id}")
 
@@ -132,7 +116,6 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
 @router.message(Command("buy"))
 @router.message(F.text.startswith("Купить подписку"))
 async def show_buy(callback_or_message: types.CallbackQuery | types.Message, state: FSMContext, session: AsyncSession):
-    """Показать меню выбора тарифа."""
     if isinstance(callback_or_message, types.CallbackQuery):
         callback = callback_or_message
         message = callback.message
@@ -173,18 +156,15 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, sta
         if message.video or message.animation or message.photo:
             await message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
         else:
-            # Пытаемся отправить анимацию (GIF), если это новое сообщение
             if not callback:
                 await message.answer_animation(
                     animation="CgACAgIAAxkBAAIE7Wm804DyYQvViOUC--9rsXLvJ8ZtAALanwACxDgSamsbGW6emV70gQ",
-                    caption=text,
-                    reply_markup=keyboard,
-                    parse_mode="HTML"
+                    caption=text, reply_markup=keyboard, parse_mode="HTML"
                 )
             else:
                 await message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception as e:
-        logger.warning(f"Не удалось отправить/отредактировать GIF, отправляем текстом. Ошибка: {e}")
+        logger.warning(f"Не удалось отправить/отредактировать: {e}")
         if callback:
             await message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
         else:
@@ -195,65 +175,45 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, sta
 
 @router.callback_query(F.data.startswith("tier_"))
 async def select_tier(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Выбор тарифа и отображение сроков (или Web App для VIP)."""
     tier = callback.data.replace("tier_", "")
     await state.update_data(tier=tier)
     
-    # === НОВОЕ: ИНТЕГРАЦИЯ MINI APP ДЛЯ VIP ТАРИФА ===
     if tier == "premium":
         text = (
             "🚀 <b>Обход белых списков (VIP)</b>\n\n"
             "Для оформления данного тарифа, выбора выгодного лимита гигабайт и количества устройств, "
             "пожалуйста, перейдите в наше удобное Mini App 👇"
         )
-        
-        # Полный URL с протоколом обязателен для WebApp кнопки
         webapp_url = "https://nemo-vpn-webapp.vercel.app/" 
-        
         keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
             [types.InlineKeyboardButton(text="📱 Открыть Mini App", web_app=types.WebAppInfo(url=webapp_url))],
             [types.InlineKeyboardButton(text="« Назад", callback_data="buy")]
         ])
-        
         try:
             if callback.message.video or callback.message.animation or callback.message.photo:
                 await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
             else:
                 await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
         except Exception as e:
-            logger.error(f"Ошибка редактирования меню VIP Mini App (пробуем новое сообщение): {e}")
+            logger.error(f"Ошибка: {e}")
             await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
-            
         await callback.answer()
         return
-    # =================================================
 
-    # Старая логика для "Обычного" тарифа остается без изменений:
-    
-    # Определяем базовую цену в зависимости от тарифа
     if tier == "premium":
         base_price_str = await get_db_setting(session, "premium_subscription_price", str(settings.PREMIUM_PRICE_RUB))
-        price_test = 100  # Цена 3 дней для VIP
+        price_test = 100
     else:
         base_price_str = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
-        price_test = 10   # Цена 3 дней для Обычного
+        price_test = 10
     
     base_price = float(base_price_str)
-    
     price_1m = await calculate_tariff_price(session, base_price, 1)
     price_3m = await calculate_tariff_price(session, base_price, 3)
     price_6m = await calculate_tariff_price(session, base_price, 6)
     price_12m = await calculate_tariff_price(session, base_price, 12)
 
-    keyboard = get_subscription_duration_keyboard(
-        tier=tier,
-        price_1m=price_1m,
-        price_3m=price_3m,
-        price_6m=price_6m,
-        price_12m=price_12m,
-        price_test=price_test
-    )
-
+    keyboard = get_subscription_duration_keyboard(tier=tier, price_1m=price_1m, price_3m=price_3m, price_6m=price_6m, price_12m=price_12m, price_test=price_test)
     text = "⏱ <b>Выберите срок подписки:</b>"
 
     try:
@@ -262,7 +222,7 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
         else:
             await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception as e:
-        logger.error(f"Ошибка редактирования меню сроков: {e}")
+        logger.error(f"Ошибка: {e}")
 
     await state.set_state(BuySubscription.selecting_duration)
     await callback.answer()
@@ -270,18 +230,15 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
 
 @router.callback_query(F.data.startswith("duration_"))
 async def select_duration(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Выбор срока подписки."""
     duration = callback.data
     data = await state.get_data()
     tier = data.get("tier", "standard")
 
-    # Получаем актуальную базовую цену
     if tier == "premium":
         base_price = float(await get_db_setting(session, "premium_subscription_price", str(settings.PREMIUM_PRICE_RUB)))
     else:
         base_price = float(await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB)))
 
-    # Определяем дни и итоговую цену (ИСПРАВЛЕНО ДЛЯ 3 ДНЕЙ)
     if duration == "duration_test3d":
         days = 3
         price = 100 if tier == "premium" else 10
@@ -303,8 +260,13 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
 
     await state.update_data(days=days, price=int(price))
 
+    # Получаем реферальный баланс для кнопки
+    user_id = callback.from_user.id
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar_one_or_none()
+    ref_balance = (user.balance + user.referral_balance) if user else 0
+
     tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
-    
     text = (
         f"✅ <b>Выбран тариф:</b> {tier_name}\n\n"
         f"⏳ Срок: <b>{days} дней</b>\n"
@@ -312,7 +274,7 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
         "💳 Выберите способ оплаты:"
     )
     
-    keyboard = get_buy_keyboard()
+    keyboard = get_buy_keyboard(referral_balance=ref_balance)
 
     try:
         if callback.message.video or callback.message.animation or callback.message.photo:
@@ -320,7 +282,7 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
         else:
             await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception as e:
-        logger.error(f"Ошибка редактирования меню покупки: {e}")
+        logger.error(f"Ошибка: {e}")
 
     await state.set_state(BuySubscription.selecting_payment_method)
     await callback.answer()
@@ -328,7 +290,6 @@ async def select_duration(callback: types.CallbackQuery, state: FSMContext, sess
 
 @router.callback_query(F.data == "pay_crypto")
 async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Оплата через CryptoBot (USDT)."""
     user_id = callback.from_user.id
     data = await state.get_data()
     
@@ -339,7 +300,6 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
     await callback.answer("⏳ Создание счета...")
     try:
         price_usdt = round(price_rub / settings.USDT_TO_RUB_RATE, 2)
-        
         bot_info = await callback.bot.get_me()
         bot_username = bot_info.username
 
@@ -355,13 +315,11 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
         )
         session.add(payment_invoice)
         await session.flush()
-        
         order_id = payment_invoice.id
 
         tier_name = "VIP" if tier == "premium" else "Обычный"
         result = await crypto_bot_service.create_invoice(
-            amount_usdt=price_usdt,
-            order_id=order_id,
+            amount_usdt=price_usdt, order_id=order_id,
             description=f"Nemo VPN подписка на {days} дней ({tier_name})",
             paid_btn_name="Вернуться в бот",
             paid_btn_url=f"https://t.me/{bot_username}"
@@ -381,7 +339,6 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
             "<i>Вы можете оплатить через USDT (TRC20, TON, BEP20) или Toncoin.</i>"
         )
         keyboard = get_payment_keyboard(invoice_url, str(real_invoice_id))
-
         try:
             if callback.message.video or callback.message.animation or callback.message.photo:
                 await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
@@ -392,39 +349,29 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
 
         await state.update_data(order_id=str(order_id))
         await state.set_state(BuySubscription.waiting_for_payment)
-        
-        logger.info(f"Создан счет CryptoBot #{order_id} (ID: {real_invoice_id}) для {user_id}: {price_usdt} USDT (Тариф: {tier})")
-
+        logger.info(f"Создан счет CryptoBot #{order_id} для {user_id}: {price_usdt} USDT ({tier})")
     except Exception as e:
         logger.error(f"Ошибка создания счета CryptoBot: {e}")
-        await callback.message.answer(
-            "❌ Произошла ошибка при создании счета.\n\n"
-            "Пожалуйста, попробуйте позже или выберите другой способ оплаты."
-        )
+        await callback.message.answer("❌ Ошибка при создании счета. Попробуйте позже.")
     await callback.answer()
 
 
 @router.callback_query(F.data == "pay_card")
 async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Оплата банковской картой через Platega."""
     user_id = callback.from_user.id
     data = await state.get_data()
-    
     price = data.get("price", settings.SUBSCRIPTION_PRICE_RUB)
     days = data.get("days", settings.SUBSCRIPTION_EXPIRE_DAYS)
     tier = data.get("tier", "standard")
     
     await callback.answer("⏳ Создание счета...")
     try:
-        import uuid
         order_id = f"platega_{user_id}_{uuid.uuid4().hex[:8]}"
         from services.payment_platega import create_invoice
         
         tier_name = "VIP" if tier == "premium" else "Обычный"
         payment_url = await create_invoice(
-            amount_rub=int(price),
-            order_id=order_id,
-            user_id=user_id,
+            amount_rub=int(price), order_id=order_id, user_id=user_id,
             description=f"Nemo VPN подписка на {days} дней ({tier_name})"
         )
 
@@ -432,12 +379,8 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
             raise Exception("Не удалось создать счет в Platega")
 
         payment_invoice = PaymentInvoice(
-            user_id=user_id,
-            invoice_id=order_id,
-            amount=price,
-            currency="RUB",
-            payment_method="platega",
-            status="pending",
+            user_id=user_id, invoice_id=order_id, amount=price,
+            currency="RUB", payment_method="platega", status="pending",
             payload=f'{{"days": {days}, "tier": "{tier}"}}',
             expires_at=datetime.utcnow() + timedelta(hours=1)
         )
@@ -449,11 +392,9 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
             f"Сумма: <b>{price} ₽</b>\n"
             f"Срок подписки: <b>{days} дней</b>\n\n"
             "Нажмите «Оплатить» для перехода к оплате.\n"
-            "Счет действителен в течение 1 часа.\n\n"
             f"ID заказа: <code>{order_id}</code>"
         )
         keyboard = get_payment_keyboard(payment_url, order_id)
-
         try:
             if callback.message.video or callback.message.animation or callback.message.photo:
                 await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
@@ -464,28 +405,20 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
 
         await state.update_data(invoice_id=order_id)
         await state.set_state(BuySubscription.waiting_for_payment)
-        logger.info(f"Создан счет Platega {order_id} для пользователя {user_id} (Тариф: {tier})")
-
+        logger.info(f"Создан счет Platega {order_id} для {user_id} ({tier})")
     except Exception as e:
         logger.error(f"Ошибка создания счета Platega: {e}")
-        await callback.message.answer(
-            "❌ Произошла ошибка при создании счета.\n\n"
-            "Пожалуйста, попробуйте позже или выберите другой способ оплаты."
-        )
+        await callback.message.answer("❌ Ошибка при создании счета. Попробуйте позже.")
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("check_payment:"))
 async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
-    """Проверка статуса оплаты."""
     user_id = callback.from_user.id
     invoice_id = callback.data.split(":")[1]
-
     await callback.answer("⏳ Проверяем оплату...", show_alert=False)
 
-    result = await session.execute(
-        select(PaymentInvoice).where(PaymentInvoice.invoice_id == invoice_id)
-    )
+    result = await session.execute(select(PaymentInvoice).where(PaymentInvoice.invoice_id == invoice_id))
     invoice = result.scalar_one_or_none()
 
     if not invoice:
@@ -506,15 +439,12 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
             async with httpx.AsyncClient(verify=False) as client:
                 response = await client.get(
                     "https://pay.crypt.bot/api/getInvoices",
-                    params={"invoice_ids": invoice_id},
-                    headers=headers,
-                    timeout=10.0
+                    params={"invoice_ids": invoice_id}, headers=headers, timeout=10.0
                 )
                 res_data = response.json()
                 if res_data.get("ok") and res_data.get("result", {}).get("items"):
                     remote_invoice = res_data["result"]["items"][0]
                     status = remote_invoice.get("status")
-                    
                     if status == "paid":
                         await process_manual_payment(callback.bot, session, invoice)
                         success_text = "✅ <b>Оплата подтверждена!</b> Подписка успешно выдана."
@@ -535,16 +465,14 @@ async def check_payment(callback: types.CallbackQuery, session: AsyncSession):
         except Exception as e:
             logger.error(f"Ошибка ручной проверки CryptoBot API: {e}")
 
-    await callback.answer("⏳ Оплата ещё не поступила. Если вы только что оплатили, подождите минутку...", show_alert=True)
+    await callback.answer("⏳ Оплата ещё не поступила. Подождите минутку...", show_alert=True)
 
 
 @router.callback_query(F.data == "cancel_payment")
 async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
-    """Отмена оплаты."""
     await state.clear()
     text = "❌ Оплата отменена.\n\nВыберите действие:"
     keyboard = get_main_menu_keyboard()
-    
     try:
         if callback.message.video or callback.message.animation or callback.message.photo:
             await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
@@ -552,5 +480,4 @@ async def cancel_payment(callback: types.CallbackQuery, state: FSMContext):
             await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception:
         pass
-        
     await callback.answer()
