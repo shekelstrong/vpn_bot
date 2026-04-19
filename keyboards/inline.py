@@ -21,10 +21,13 @@ def get_main_menu_keyboard(show_trial: bool = True) -> InlineKeyboardMarkup:
     builder.button(text="Подписка 📦", callback_data="subscription", style="primary")
     builder.button(text="Купить подписку 🛒", callback_data="buy", style="primary")
     
-    # Row 3: Подарок
+    # Row 3: Докупить трафик
+    builder.button(text="📦 Докупить трафик", callback_data="traffic_buy", style="primary")
+    
+    # Row 4: Подарок
     builder.button(text="🎁 Подарить VPN", callback_data="gift_start", style="primary")
     
-    # Row 4: Красная кнопка
+    # Row 5: Красная кнопка
     builder.button(text="Помощь 🆘", callback_data="help", style="danger")
     
     # Row 5: Зелёная кнопка (только если нет активной подписки)
