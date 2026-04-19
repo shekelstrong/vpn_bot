@@ -263,17 +263,23 @@ def get_subscription_duration_keyboard(
     price_12m: float,
     price_test: float
 ) -> InlineKeyboardMarkup:
-    """Клавиатура выбора срока подписки с учетом тарифа и ГБ лимитов."""
+    """Клавиатура выбора срока подписки."""
     builder = InlineKeyboardBuilder()
     
-    test_gb = 3 if tier == "premium" else 3
-    gb_1m, gb_3m, gb_6m, gb_12m = 100, 350, 800, 2048
-    
-    builder.button(text=f"🥉 3 дня — {int(price_test)}₽ ({test_gb} ГБ)", callback_data="duration_test3d", style="primary")
-    builder.button(text=f"1 месяц — {int(price_1m)}₽ ({gb_1m} ГБ)", callback_data="duration_1month", style="primary")
-    builder.button(text=f"3 месяца — {int(price_3m)}₽ ({gb_3m} ГБ)", callback_data="duration_3month", style="primary")
-    builder.button(text=f"6 месяцев — {int(price_6m)}₽ ({gb_6m} ГБ)", callback_data="duration_6month", style="primary")
-    builder.button(text=f"12 месяцев — {int(price_12m)}₽ ({gb_12m} ГБ = 2 ТБ)", callback_data="duration_12month", style="primary")
+    if tier == "premium":
+        # VIP — с ГБ лимитами
+        builder.button(text=f"🥉 3 дня — {int(price_test)}₽ (3 ГБ)", callback_data="duration_test3d", style="primary")
+        builder.button(text=f"1 месяц — {int(price_1m)}₽ (100 ГБ)", callback_data="duration_1month", style="primary")
+        builder.button(text=f"3 месяца — {int(price_3m)}₽ (350 ГБ)", callback_data="duration_3month", style="primary")
+        builder.button(text=f"6 месяцев — {int(price_6m)}₽ (800 ГБ)", callback_data="duration_6month", style="primary")
+        builder.button(text=f"12 месяцев — {int(price_12m)}₽ (2 ТБ)", callback_data="duration_12month", style="primary")
+    else:
+        # Стандарт — безлимит
+        builder.button(text=f"🥉 3 дня — {int(price_test)}₽", callback_data="duration_test3d", style="primary")
+        builder.button(text=f"1 месяц — {int(price_1m)}₽ ♾️", callback_data="duration_1month", style="primary")
+        builder.button(text=f"3 месяца — {int(price_3m)}₽ ♾️", callback_data="duration_3month", style="primary")
+        builder.button(text=f"6 месяцев — {int(price_6m)}₽ ♾️", callback_data="duration_6month", style="primary")
+        builder.button(text=f"12 месяцев — {int(price_12m)}₽ ♾️", callback_data="duration_12month", style="primary")
     
     builder.button(text="Назад ↩️", callback_data="buy", style="danger") 
     
