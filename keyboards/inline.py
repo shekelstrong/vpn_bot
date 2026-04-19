@@ -328,10 +328,10 @@ def get_gift_duration_keyboard(tier: str) -> InlineKeyboardMarkup:
         builder.button(text="6 месяцев — 1900₽ (800 ГБ)", callback_data="gift_dur_180", style="primary")
         builder.button(text="12 месяцев — 3500₽ (2 ТБ)", callback_data="gift_dur_365", style="primary")
     else:
-        builder.button(text="1 месяц — 150₽ (100 ГБ)", callback_data="gift_dur_30", style="primary")
-        builder.button(text="3 месяца — 400₽ (350 ГБ)", callback_data="gift_dur_90", style="primary")
-        builder.button(text="6 месяцев — 700₽ (800 ГБ)", callback_data="gift_dur_180", style="primary")
-        builder.button(text="12 месяцев — 1200₽ (2 ТБ)", callback_data="gift_dur_365", style="primary")
+        builder.button(text="1 месяц — 150₽ ♾️", callback_data="gift_dur_30", style="primary")
+        builder.button(text="3 месяца — 400₽ ♾️", callback_data="gift_dur_90", style="primary")
+        builder.button(text="6 месяцев — 700₽ ♾️", callback_data="gift_dur_180", style="primary")
+        builder.button(text="12 месяцев — 1200₽ ♾️", callback_data="gift_dur_365", style="primary")
     
     builder.button(text="Назад ↩️", callback_data="gift_start", style="danger")
     
