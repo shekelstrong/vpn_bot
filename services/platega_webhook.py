@@ -138,8 +138,14 @@ async def _process_traffic_payment(session, bot, user, invoice, amount, traffic_
 
     if user.marzban_username:
         try:
-            new_limit_bytes = int(user.gb_limit * 1024**3)
-            await marzban_service.update_user_data_limit(user.marzban_username, new_limit_bytes)
+            # Кумулятивно: берём used_traffic из Marzban и прибавляем новые ГБ
+            mz_user = await marzban_service.get_user(user.marzban_username)
+            if mz_user:
+                used_bytes = mz_user.get("used_traffic") or 0
+                new_limit_gb = used_bytes / (1024**3) + traffic_gb
+                await marzban_service.update_user_data_limit(user.marzban_username, new_limit_gb)
+            else:
+                await marzban_service.update_user_data_limit(user.marzban_username, user.gb_limit)
         except Exception as e:
             logger.error(f"Ошибка обновления лимита Marzban: {e}")
 
