@@ -1034,7 +1034,7 @@ class WebhookHandler:
                     await self.bot.send_message(tg_id,
                         f"🎁 <b>Подарок оплачен из реферального баланса!</b>\n\n"
                         f"Списано: {amount:.0f}₽\n"
-                        f"Ссылка для друга: <code>{gift_link}</code>",
+                        f"Ссылка для друга: {gift_link}",
                         parse_mode="HTML")
                 except: pass
                 

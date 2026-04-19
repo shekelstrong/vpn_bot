@@ -215,6 +215,20 @@ async def process_gift_activation(message: Message, session: AsyncSession, bot: 
         f"Приятного пользования! 🎉",
         parse_mode="HTML"
     )
+    
+    # Уведомляем дарителя что подарок активирован
+    try:
+        activator_name = message.from_user.username or f"ID: {user_id}"
+        await bot.send_message(gift.creator_id,
+            f"🎁 <b>Ваш подарок активирован!</b>\n\n"
+            f"Пользователь активировал подарочную подписку.\n"
+            f"Тариф: {tier_name}\n"
+            f"Срок: {gift.days} дней",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.warning(f"Не удалось уведомить дарителя {gift.creator_id}: {e}")
+    
     logger.info(f"Подарочный код {code} активирован пользователем {user_id}")
 
 

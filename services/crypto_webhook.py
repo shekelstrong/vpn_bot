@@ -278,7 +278,7 @@ async def _process_gift_payment(session, bot, user, invoice, amount, tier, days,
     await bot.send_message(user_id,
         f"🎁 <b>Подарочная подписка оплачена!</b>\n\n"
         f"Отправьте эту ссылку другу:\n\n"
-        f"<code>{gift_link}</code>\n\n"
+        f"{gift_link}\n\n"
         f"⏳ Код действителен <b>30 дней</b>.",
         parse_mode="HTML"
     )
