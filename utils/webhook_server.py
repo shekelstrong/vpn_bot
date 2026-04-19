@@ -902,6 +902,85 @@ class WebhookHandler:
             logger.error(traceback.format_exc())
             return web.json_response({"error": str(e)}, status=500)
 
+    async def api_buy_traffic_referral(self, request: web.Request) -> web.Response:
+        """Докупка трафика из реферального баланса."""
+        try:
+            data = await request.json()
+            tg_id = int(data.get("tg_id"))
+            gb = int(data.get("gb"))
+            price = int(data.get("price"))
+            
+            logger.info(f"📦 Докупка трафика из реф баланса: {tg_id}, +{gb}ГБ, {price}₽")
+            
+            async with get_session_factory()() as session:
+                result = await session.execute(select(User).where(User.user_id == tg_id))
+                user = result.scalar_one_or_none()
+                if not user:
+                    return web.json_response({"error": "Пользователь не найден"}, status=404)
+                
+                if user.referral_balance < price:
+                    return web.json_response({"error": f"Недостаточно средств. Баланс: {user.referral_balance:.0f}₽, нужно: {price}₽"}, status=400)
+                
+                # Confirm handled on frontend
+                user.referral_balance -= price
+                
+                # Add GB cumulatively
+                current_used_gb = 0
+                if user.marzban_username:
+                    try:
+                        mdata = await marzban_service.get_user(user.marzban_username)
+                        if mdata:
+                            current_used_gb = (mdata.get("used_traffic", 0) or 0) / (1024**3)
+                    except: pass
+                
+                new_limit_gb = current_used_gb + gb
+                user.gb_limit = new_limit_gb
+                
+                # Update Marzban
+                if user.marzban_username:
+                    try:
+                        new_limit_bytes = int(new_limit_gb * 1024**3)
+                        await marzban_service.update_user_data_limit(user.marzban_username, new_limit_bytes)
+                    except Exception as e:
+                        logger.error(f"Marzban error traffic topup: {e}")
+                
+                # Transaction
+                import uuid
+                from database.models import Transaction
+                txn = Transaction(
+                    user_id=tg_id, amount=price, currency="RUB",
+                    payment_method="referral_balance_traffic", status="paid",
+                    payment_id=f"ref_traffic_{uuid.uuid4().hex[:8]}",
+                    description=f"Докупка {gb} ГБ из реферального баланса"
+                )
+                session.add(txn)
+                await session.commit()
+                
+                # Notify user
+                try:
+                    await self.bot.send_message(tg_id, 
+                        f"✅ <b>+{gb} ГБ добавлено!</b>\n"
+                        f"Списано {price}₽ с реферального баланса\n"
+                        f"Новый лимит: {new_limit_gb:.0f} ГБ",
+                        parse_mode="HTML")
+                except: pass
+                
+                # Notify admins
+                try:
+                    for admin_id in settings.admin_ids_list:
+                        await self.bot.send_message(admin_id,
+                            f"📦 <b>Докупка трафика (реф баланс)</b>\n"
+                            f"ID: <code>{tg_id}</code>\n"
+                            f"+{gb} ГБ за {price}₽\n"
+                            f"Новый лимит: {new_limit_gb:.0f} ГБ",
+                            parse_mode="HTML")
+                except: pass
+                
+                return web.json_response({"status": "success", "gb": gb, "new_limit": new_limit_gb})
+        except Exception as e:
+            logger.error(f"API Buy Traffic Referral Error: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
 
 async def run_webhooks(bot=None):
     """Функция запуска веб-сервера."""
@@ -931,6 +1010,7 @@ async def run_webhooks(bot=None):
     
     # === НОВЫЕ РОУТЫ: TRAFFIC / GIFT / REFERRAL ===
     app.router.add_post('/api/buy_traffic', handler.api_buy_traffic)
+    app.router.add_post('/api/buy_traffic_referral', handler.api_buy_traffic_referral)
     app.router.add_post('/api/create_gift', handler.api_create_gift)
     app.router.add_post('/api/pay_referral', handler.api_pay_referral)
     # ============================================
