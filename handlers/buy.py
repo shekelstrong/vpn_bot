@@ -81,7 +81,7 @@ async def traffic_select_package(callback: types.CallbackQuery, state: FSMContex
     # Парсим размер пакета
     gb = int(callback.data.replace("traffic_", ""))
     
-    TRAFFIC_PRICES = {50: 50, 100: 90, 300: 250, 500: 400}
+    TRAFFIC_PRICES = {50: 100, 100: 200, 300: 600, 500: 1000}
     price = TRAFFIC_PRICES.get(gb)
     
     if not price:

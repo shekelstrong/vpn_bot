@@ -482,7 +482,7 @@ class WebhookHandler:
 
             tg_id = int(tg_id_raw)
             gb = int(data["gb"])          # 50, 100, 300, 500
-            price = int(data["price"])     # 50, 90, 250, 400
+            price = int(data["price"])     # 100, 200, 600, 1000
             payment_method = data.get("payment_method", "cryptopay")
 
             logger.info(f"📦 Создание инвойса на трафик: {tg_id}, {gb} ГБ, {price}₽ через {payment_method}")

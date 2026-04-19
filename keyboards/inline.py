@@ -210,10 +210,10 @@ def get_back_keyboard(callback_data: str = "back_to_main") -> InlineKeyboardMark
 # =====================================================================
 
 TRAFFIC_PACKAGES = [
-    {"gb": 50, "price": 50},
-    {"gb": 100, "price": 90},
-    {"gb": 300, "price": 250},
-    {"gb": 500, "price": 400},
+    {"gb": 50, "price": 100},
+    {"gb": 100, "price": 200},
+    {"gb": 300, "price": 600},
+    {"gb": 500, "price": 1000},
 ]
 
 
@@ -285,10 +285,10 @@ def get_traffic_buy_keyboard() -> InlineKeyboardMarkup:
     """
     builder = InlineKeyboardBuilder()
     
-    builder.button(text="50 ГБ — 50₽", callback_data="traffic_50", style="primary")
-    builder.button(text="100 ГБ — 90₽", callback_data="traffic_100", style="primary")
-    builder.button(text="300 ГБ — 250₽", callback_data="traffic_300", style="primary")
-    builder.button(text="500 ГБ — 400₽", callback_data="traffic_500", style="primary")
+    builder.button(text="50 ГБ — 100₽", callback_data="traffic_50", style="primary")
+    builder.button(text="100 ГБ — 200₽", callback_data="traffic_100", style="primary")
+    builder.button(text="300 ГБ — 600₽", callback_data="traffic_300", style="primary")
+    builder.button(text="500 ГБ — 1000₽", callback_data="traffic_500", style="primary")
     builder.button(text="Назад ↩️", callback_data="buy", style="danger")
     
     builder.adjust(1, 1, 1, 1, 1)
