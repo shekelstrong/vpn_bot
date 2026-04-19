@@ -46,12 +46,20 @@ async def traffic_buy_callback(callback: types.CallbackQuery, session: AsyncSess
     user = result.scalar_one_or_none()
     
     if not user or not user.marzban_username:
-        await callback.message.edit_text(
-            "❌ <b>Докупка трафика доступна только с активной подпиской.</b>\n\n"
-            "Сначала оформите подписку!",
-            reply_markup=get_back_keyboard("buy"),
-            parse_mode="HTML"
-        )
+        try:
+            await callback.message.edit_text(
+                "❌ <b>Докупка трафика доступна только с активной подпиской.</b>\n\n"
+                "Сначала оформите подписку!",
+                reply_markup=get_back_keyboard("buy"),
+                parse_mode="HTML"
+            )
+        except:
+            await callback.message.answer(
+                "❌ <b>Докупка трафика доступна только с активной подпиской.</b>\n\n"
+                "Сначала оформите подписку!",
+                reply_markup=get_back_keyboard("buy"),
+                parse_mode="HTML"
+            )
         return
     
     text = (
@@ -103,13 +111,15 @@ async def gift_start_callback(callback: types.CallbackQuery, session: AsyncSessi
     """Показать выбор тарифа для подарка."""
     await callback.answer()
     
-    await callback.message.edit_text(
+    text = (
         "🎁 <b>Подарить VPN</b>\n\n"
         "Выберите тариф для друга.\n"
-        "После оплаты вы получите подарочную ссылку, которую можно отправить любому человеку.",
-        reply_markup=get_gift_tier_keyboard(),
-        parse_mode="HTML"
+        "После оплаты вы получите подарочную ссылку, которую можно отправить любому человеку."
     )
+    try:
+        await callback.message.edit_text(text, reply_markup=get_gift_tier_keyboard(), parse_mode="HTML")
+    except:
+        await callback.message.answer(text, reply_markup=get_gift_tier_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(F.data.in_({"gift_standard", "gift_premium"}))
@@ -125,13 +135,15 @@ async def gift_select_tier(callback: types.CallbackQuery, state: FSMContext):
     
     tier_name = "🚀 VIP (Обход белых списков)" if tier == "premium" else "🛡 Обычный VPN"
     
-    await callback.message.edit_text(
+    text = (
         f"🎁 <b>Подарить VPN</b>\n\n"
         f"Тариф: <b>{tier_name}</b>\n\n"
-        f"Выберите срок подарочной подписки:",
-        reply_markup=get_gift_duration_keyboard(tier),
-        parse_mode="HTML"
+        f"Выберите срок подарочной подписки:"
     )
+    try:
+        await callback.message.edit_text(text, reply_markup=get_gift_duration_keyboard(tier), parse_mode="HTML")
+    except:
+        await callback.message.answer(text, reply_markup=get_gift_duration_keyboard(tier), parse_mode="HTML")
     
     await state.set_state("gift_select_duration")
 
