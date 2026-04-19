@@ -252,8 +252,6 @@ class WebhookHandler:
                 # Временный ID для обхода ограничения UNIQUE
                 temp_uid = f"temp_{uuid.uuid4().hex[:8]}"
                 
-                # ИСПРАВЛЕНИЕ: Мы убрали 'device_count' из прямого обращения к таблице, 
-                # чтобы PostgreSQL не выдавал ошибку. Данные сохраняются внутри payload.
                 invoice = PaymentInvoice(
                     user_id=tg_id,
                     invoice_id=temp_uid,
@@ -469,6 +467,426 @@ class WebhookHandler:
             logger.error(traceback.format_exc())
             return web.json_response({"error": str(e)}, status=500)
 
+    # ==========================================
+    # НОВЫЕ API ENDPOINTS: TRAFFIC / GIFT / REFERRAL
+    # ==========================================
+
+    async def api_buy_traffic(self, request: web.Request) -> web.Response:
+        """Создание инвойса для покупки дополнительного трафика."""
+        try:
+            data = await request.json()
+            tg_id_raw = data.get("tg_id")
+
+            if not tg_id_raw:
+                return web.json_response({"error": "tg_id is required"}, status=400)
+
+            tg_id = int(tg_id_raw)
+            gb = int(data["gb"])          # 50, 100, 300, 500
+            price = int(data["price"])     # 50, 90, 250, 400
+            payment_method = data.get("payment_method", "cryptopay")
+
+            logger.info(f"📦 Создание инвойса на трафик: {tg_id}, {gb} ГБ, {price}₽ через {payment_method}")
+
+            # Проверяем что у пользователя есть активная подписка
+            async with get_session_factory()() as session:
+                result = await session.execute(select(User).where(User.user_id == tg_id))
+                user = result.scalar_one_or_none()
+                if not user:
+                    return web.json_response({"error": "Пользователь не найден"}, status=404)
+                if not user.marzban_username:
+                    return web.json_response({"error": "У вас нет активной подписки"}, status=400)
+
+            pay_url = None
+            final_invoice_id = ""
+
+            async with get_session_factory()() as session:
+                import uuid
+                temp_uid = f"temp_{uuid.uuid4().hex[:8]}"
+
+                invoice = PaymentInvoice(
+                    user_id=tg_id,
+                    invoice_id=temp_uid,
+                    amount=price,
+                    currency="RUB",
+                    payment_method=payment_method,
+                    status="pending",
+                    payload=json.dumps({
+                        "type": "traffic",
+                        "gb": gb,
+                        "price": price
+                    }),
+                    created_at=datetime.utcnow()
+                )
+                session.add(invoice)
+                await session.flush()
+
+                if payment_method == "cryptopay":
+                    final_invoice_id = str(invoice.id)
+                elif payment_method == "platega":
+                    final_invoice_id = f"platega_{tg_id}_{invoice.id}"
+
+                invoice.invoice_id = final_invoice_id
+                await session.commit()
+                invoice_db_id = invoice.id
+
+            # Запрашиваем ссылку у платёжки
+            if payment_method == "cryptopay":
+                try:
+                    rate = getattr(settings, 'USDT_TO_RUB_RATE', 95.0)
+                    price_usdt = round(price / rate, 2)
+
+                    res = await crypto_bot_service.create_invoice(
+                        amount_usdt=price_usdt,
+                        order_id=final_invoice_id,
+                        description=f"Nemo VPN: +{gb} ГБ трафика"
+                    )
+                    if res:
+                        pay_url = res[0]
+                except Exception as e:
+                    logger.error(f"Ошибка CryptoBot API (traffic): {e}")
+                    raise Exception(f"Ошибка CryptoBot: {e}")
+
+            elif payment_method == "platega":
+                from services.payment_platega import create_invoice as create_sbp
+                pay_url = await create_sbp(
+                    amount_rub=price,
+                    order_id=final_invoice_id,
+                    user_id=tg_id,
+                    description=f"Nemo VPN: +{gb} ГБ трафика"
+                )
+
+            if not pay_url:
+                async with get_session_factory()() as session:
+                    result = await session.execute(select(PaymentInvoice).where(PaymentInvoice.id == invoice_db_id))
+                    inv_to_del = result.scalar_one_or_none()
+                    if inv_to_del:
+                        await session.delete(inv_to_del)
+                        await session.commit()
+                return web.json_response({"error": "Не удалось сгенерировать ссылку"}, status=500)
+
+            return web.json_response({
+                "status": "success",
+                "pay_url": pay_url,
+                "invoice_id": final_invoice_id
+            })
+
+        except Exception as e:
+            logger.error(f"API Buy Traffic Error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def api_create_gift(self, request: web.Request) -> web.Response:
+        """Создание инвойса для подарочной подписки."""
+        try:
+            data = await request.json()
+            tg_id_raw = data.get("tg_id")
+
+            if not tg_id_raw:
+                return web.json_response({"error": "tg_id is required"}, status=400)
+
+            tg_id = int(tg_id_raw)
+            tier = data.get("tier", "premium")
+            days = int(data.get("days", 30))
+            payment_method = data.get("payment_method", "cryptopay")
+
+            # Рассчитываем цену и gb_limit
+            # Маппинг: 1 мес = 30 дней, 3 мес = 90, 6 мес = 180, 12 мес = 365
+            months_map = {30: 1, 90: 3, 180: 6, 365: 12}
+            months = months_map.get(days, 1)
+
+            # GB лимиты по тарифу
+            GB_LIMITS = {
+                1: 100,   # 1 месяц — 100 ГБ
+                3: 300,   # 3 месяца — 300 ГБ
+                6: 600,   # 6 месяцев — 600 ГБ
+                12: 0,    # 12 месяцев — безлимит
+            }
+            gb_limit = GB_LIMITS.get(months, 100)
+
+            # Цены подарка (можно вынести в настройки)
+            GIFT_PRICES = {
+                ("premium", 30): 300,
+                ("premium", 90): 800,
+                ("premium", 180): 1400,
+                ("premium", 365): 2500,
+                ("standard", 30): 150,
+                ("standard", 90): 400,
+                ("standard", 180): 700,
+                ("standard", 365): 1200,
+            }
+            price = data.get("price") or GIFT_PRICES.get((tier, days), 300)
+
+            logger.info(f"🎁 Создание подарочного инвойса: {tg_id}, {tier}, {days}дн, {price}₽, {gb_limit} ГБ")
+
+            pay_url = None
+            final_invoice_id = ""
+
+            async with get_session_factory()() as session:
+                import uuid
+                temp_uid = f"temp_{uuid.uuid4().hex[:8]}"
+
+                invoice = PaymentInvoice(
+                    user_id=tg_id,
+                    invoice_id=temp_uid,
+                    amount=price,
+                    currency="RUB",
+                    payment_method=payment_method,
+                    status="pending",
+                    payload=json.dumps({
+                        "type": "gift",
+                        "tier": tier,
+                        "days": days,
+                        "gb_limit": gb_limit,
+                        "price": price
+                    }),
+                    created_at=datetime.utcnow()
+                )
+                session.add(invoice)
+                await session.flush()
+
+                if payment_method == "cryptopay":
+                    final_invoice_id = str(invoice.id)
+                elif payment_method == "platega":
+                    final_invoice_id = f"platega_{tg_id}_{invoice.id}"
+
+                invoice.invoice_id = final_invoice_id
+                await session.commit()
+                invoice_db_id = invoice.id
+
+            # Запрашиваем ссылку у платёжки
+            if payment_method == "cryptopay":
+                try:
+                    rate = getattr(settings, 'USDT_TO_RUB_RATE', 95.0)
+                    price_usdt = round(price / rate, 2)
+
+                    res = await crypto_bot_service.create_invoice(
+                        amount_usdt=price_usdt,
+                        order_id=final_invoice_id,
+                        description=f"Nemo VPN: подарок ({tier}, {days}дн)"
+                    )
+                    if res:
+                        pay_url = res[0]
+                except Exception as e:
+                    logger.error(f"Ошибка CryptoBot API (gift): {e}")
+                    raise Exception(f"Ошибка CryptoBot: {e}")
+
+            elif payment_method == "platega":
+                from services.payment_platega import create_invoice as create_sbp
+                pay_url = await create_sbp(
+                    amount_rub=int(price),
+                    order_id=final_invoice_id,
+                    user_id=tg_id,
+                    description=f"Nemo VPN: подарок ({tier}, {days}дн)"
+                )
+
+            if not pay_url:
+                async with get_session_factory()() as session:
+                    result = await session.execute(select(PaymentInvoice).where(PaymentInvoice.id == invoice_db_id))
+                    inv_to_del = result.scalar_one_or_none()
+                    if inv_to_del:
+                        await session.delete(inv_to_del)
+                        await session.commit()
+                return web.json_response({"error": "Не удалось сгенерировать ссылку"}, status=500)
+
+            return web.json_response({
+                "status": "success",
+                "pay_url": pay_url,
+                "invoice_id": final_invoice_id
+            })
+
+        except Exception as e:
+            logger.error(f"API Create Gift Error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def api_pay_referral(self, request: web.Request) -> web.Response:
+        """Оплата подписки из реферального баланса."""
+        try:
+            data = await request.json()
+            tg_id_raw = data.get("tg_id")
+
+            if not tg_id_raw:
+                return web.json_response({"error": "tg_id is required"}, status=400)
+
+            tg_id = int(tg_id_raw)
+            days = int(data.get("days", 30))
+            tier = data.get("tier", "premium")
+
+            # Определяем цену (аналогично gift/subscription)
+            GIFT_PRICES = {
+                ("premium", 30): 300,
+                ("premium", 90): 800,
+                ("premium", 180): 1400,
+                ("premium", 365): 2500,
+                ("standard", 30): 150,
+                ("standard", 90): 400,
+                ("standard", 180): 700,
+                ("standard", 365): 1200,
+            }
+            amount = float(data.get("amount") or GIFT_PRICES.get((tier, days), 300))
+
+            logger.info(f"👥 Оплата с реферального баланса: {tg_id}, {amount}₽, {tier}, {days}дн")
+
+            async with get_session_factory()() as session:
+                result = await session.execute(select(User).where(User.user_id == tg_id))
+                user = result.scalar_one_or_none()
+
+                if not user:
+                    return web.json_response({"error": "Пользователь не найден"}, status=404)
+
+                if user.referral_balance < amount:
+                    return web.json_response({
+                        "error": f"Недостаточно средств на реферальном балансе. Баланс: {user.referral_balance:.2f}₽, нужно: {amount:.2f}₽"
+                    }, status=400)
+
+                # Списываем с реферального баланса
+                user.referral_balance -= amount
+
+                import uuid
+                from database.models import Transaction
+                payment_id = f"referral_{uuid.uuid4().hex[:8]}"
+
+                transaction = Transaction(
+                    user_id=tg_id,
+                    amount=amount,
+                    currency="RUB",
+                    payment_method="referral_balance",
+                    status="paid",
+                    payment_id=payment_id,
+                    description=f"Оплата с реферального баланса на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'})"
+                )
+                session.add(transaction)
+
+                # Продлеваем подписку
+                now = datetime.utcnow()
+                if user.expire_date and user.expire_date > now:
+                    user.expire_date = user.expire_date + timedelta(days=days)
+                else:
+                    user.expire_date = now + timedelta(days=days)
+
+                user.tier = tier
+
+                # Обновляем Marzban
+                try:
+                    gb_limit_val = user.gb_limit or 0
+                    if user.marzban_username:
+                        marzban_data = await marzban_service.get_user(user.marzban_username)
+                        if marzban_data:
+                            await marzban_service.update_user_full(
+                                user.marzban_username,
+                                extra_days=days,
+                                tier=tier,
+                                device_count=user.device_count,
+                                data_limit_gb=gb_limit_val
+                            )
+                        else:
+                            new_acc = await marzban_service.create_user(
+                                tg_id, user.username, days,
+                                data_limit_gb=gb_limit_val, tier=tier, device_count=user.device_count
+                            )
+                            user.marzban_username = new_acc.get('username')
+                    else:
+                        new_acc = await marzban_service.create_user(
+                            tg_id, user.username, days,
+                            data_limit_gb=gb_limit_val, tier=tier, device_count=user.device_count
+                        )
+                        user.marzban_username = new_acc.get('username')
+                except Exception as e:
+                    logger.error(f"Ошибка Marzban при оплате с реферального баланса: {e}")
+
+                # Реферальные бонусы пригласившему
+                referrers_bonuses = []
+                try:
+                    percentages = settings.referral_percentages_list
+                    current_referrer_id = user.referrer_id
+
+                    for level, pct in enumerate(percentages, 1):
+                        if not current_referrer_id:
+                            break
+                        ref_res = await session.execute(select(User).where(User.user_id == current_referrer_id))
+                        referrer = ref_res.scalar_one_or_none()
+                        if not referrer:
+                            break
+
+                        bonus = amount * (pct / 100.0)
+                        referrer.referral_balance += bonus
+                        referrers_bonuses.append({
+                            'level': level, 'id': referrer.user_id,
+                            'username': referrer.username, 'bonus': bonus
+                        })
+
+                        # Уведомляем реферера
+                        try:
+                            await self.bot.send_message(
+                                referrer.user_id,
+                                f"💸 <b>Реферальное начисление!</b>\n\n"
+                                f"Ваш реферал (ID: {tg_id}) оплатил подписку с реферального баланса.\n"
+                                f"Вам начислено: <b>+{bonus:.2f}₽</b> ({level} уровень, {pct}%)\n\n"
+                                f"Реферальный баланс: {referrer.referral_balance:.2f}₽",
+                                parse_mode="HTML"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Не удалось уведомить реферера {referrer.user_id}: {e}")
+
+                        current_referrer_id = referrer.referrer_id
+                except Exception as e:
+                    logger.error(f"Ошибка начисления реферальных бонусов: {e}")
+
+                await session.commit()
+
+            # Уведомляем пользователя
+            try:
+                tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+                sub_url = ""
+                vless_link = ""
+                if user.marzban_username:
+                    sub_url = await marzban_service.get_user_subscription(user.marzban_username)
+                    vless_link = await marzban_service.get_user_vless_link(user.marzban_username)
+
+                msg = (
+                    f"✅ <b>Оплата с реферального баланса прошла успешно!</b>\n\n"
+                    f"💎 Тариф: <b>{tier_name}</b>\n"
+                    f"⏳ Подписка: <b>{days} дней</b>\n"
+                    f"💰 Списано: <b>{amount:.2f}₽</b> с реферального баланса\n\n"
+                )
+                if sub_url:
+                    msg += (
+                        f"🔑 <b>Subscription URL:</b>\n<code>{sub_url}</code>\n\n"
+                        f"🔗 <b>VLESS ключ:</b>\n<code>{vless_link}</code>\n\n"
+                        f"Приятного пользования! 🎉"
+                    )
+                else:
+                    msg += "🔗 Подписка активирована!\nПроверьте профиль для подключения."
+
+                await self.bot.send_message(tg_id, msg, parse_mode="HTML")
+            except Exception as e:
+                logger.warning(f"Не удалось уведомить {tg_id}: {e}")
+
+            # Уведомляем админов
+            try:
+                user_display = f" @{user.username}" if user.username else f"ID: {tg_id}"
+                admin_msg = (
+                    f"👥 <b>Покупка с реферального баланса!</b>\n\n"
+                    f"🆔 ID: <code>{tg_id}</code>\n"
+                    f"👤 Профиль: {user_display}\n"
+                    f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
+                    f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>"
+                )
+                for admin_id in settings.admin_ids_list:
+                    await self.bot.send_message(admin_id, admin_msg, parse_mode="HTML")
+            except Exception as e:
+                logger.error(f"Ошибка уведомления админов: {e}")
+
+            return web.json_response({"status": "success", "message": "Оплата прошла успешно"})
+
+        except Exception as e:
+            logger.error(f"API Pay Referral Error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return web.json_response({"error": str(e)}, status=500)
+
 
 async def run_webhooks(bot=None):
     """Функция запуска веб-сервера."""
@@ -490,12 +908,17 @@ async def run_webhooks(bot=None):
     
     app.router.add_get('/health', handler.health_check)
 
-    # === НОВЫЕ РОУТЫ MINI APP ===
+    # === РОУТЫ MINI APP API ===
     app.router.add_get('/api/user', handler.api_get_user)
     app.router.add_post('/api/check_task', handler.api_check_task)
     app.router.add_post('/api/invoice', handler.api_create_invoice)
     app.router.add_post('/api/pay_balance', handler.api_pay_from_balance)
-    # ============================
+    
+    # === НОВЫЕ РОУТЫ: TRAFFIC / GIFT / REFERRAL ===
+    app.router.add_post('/api/buy_traffic', handler.api_buy_traffic)
+    app.router.add_post('/api/create_gift', handler.api_create_gift)
+    app.router.add_post('/api/pay_referral', handler.api_pay_referral)
+    # ============================================
 
     runner = web.AppRunner(app)
     await runner.setup()
