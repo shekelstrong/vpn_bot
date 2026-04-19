@@ -15,6 +15,7 @@ from database.models import User, PaymentInvoice, Transaction, GiftCode
 from services.marzban_api import marzban_service
 from sqlalchemy import select
 from database.engine import get_session_factory
+from services.crypto_webhook import _process_referrer_bonuses
 
 
 async def handle_platega_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[str, str]:
@@ -159,6 +160,7 @@ async def _process_traffic_payment(session, bot, user, invoice, amount, traffic_
                 f"+{traffic_gb} ГБ за {amount:.0f}₽",
                 parse_mode="HTML")
     except: pass
+    await _process_referrer_bonuses(session, bot, user, amount, "докупил трафик")
     return True
 
 
@@ -200,6 +202,7 @@ async def _process_gift_payment(session, bot, user, invoice, amount, tier, days,
                 f"Сумма: {amount:.0f}₽",
                 parse_mode="HTML")
     except: pass
+    await _process_referrer_bonuses(session, bot, user, amount, "купил VPN в подарок")
     return True
 
 

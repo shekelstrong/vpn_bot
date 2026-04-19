@@ -975,6 +975,15 @@ class WebhookHandler:
                             parse_mode="HTML")
                 except: pass
                 
+                # Referrer bonuses
+                try:
+                    from services.crypto_webhook import _process_referrer_bonuses
+                    async with get_session_factory()() as ref_session:
+                        await _process_referrer_bonuses(ref_session, self.bot, user, price, "докупил трафик")
+                        await ref_session.commit()
+                except Exception as e:
+                    logger.error(f"Referrer bonus error (traffic): {e}")
+                
                 return web.json_response({"status": "success", "gb": gb, "new_limit": new_limit_gb})
         except Exception as e:
             logger.error(f"API Buy Traffic Referral Error: {e}")
@@ -1039,6 +1048,18 @@ class WebhookHandler:
                             f"Сумма: {amount:.0f}₽",
                             parse_mode="HTML")
                 except: pass
+                
+                # Referrer bonuses
+                try:
+                    from services.crypto_webhook import _process_referrer_bonuses
+                    async with get_session_factory()() as ref_session:
+                        ref_result = await ref_session.execute(select(User).where(User.user_id == tg_id))
+                        ref_user = ref_result.scalar_one_or_none()
+                        if ref_user:
+                            await _process_referrer_bonuses(ref_session, self.bot, ref_user, amount, "купил VPN в подарок")
+                            await ref_session.commit()
+                except Exception as e:
+                    logger.error(f"Referrer bonus error (gift): {e}")
                 
                 return web.json_response({"status": "success", "gift_link": gift_link, "code": code})
         except Exception as e:

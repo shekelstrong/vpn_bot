@@ -17,6 +17,37 @@ from sqlalchemy import select
 from database.engine import get_session_factory
 
 
+async def _process_referrer_bonuses(session, bot, user, amount, action_type="пополнил баланс"):
+    """Начисление реферальных бонусов по 3 уровням (15/10/5%).
+    Уведомляет рефоводов без указания кто именно."""
+    try:
+        percentages = settings.referral_percentages_list  # [15, 10, 5]
+        current_referrer_id = user.referrer_id
+        
+        for level, pct in enumerate(percentages, 1):
+            if not current_referrer_id: break
+            ref_result = await session.execute(select(User).where(User.user_id == current_referrer_id))
+            referrer = ref_result.scalar_one_or_none()
+            if not referrer: break
+            
+            bonus = float(amount) * (pct / 100.0)
+            referrer.referral_balance += bonus
+            
+            try:
+                await bot.send_message(referrer.user_id,
+                    f"💸 <b>Реферальное начисление!</b>\n\n"
+                    f"Ваш реферал {action_type}.\n"
+                    f"Вам начислено: <b>+{bonus:.2f}₽</b> ({level} уровень, {pct}%)\n\n"
+                    f"Реферальный баланс: {referrer.referral_balance:.2f}₽",
+                    parse_mode="HTML"
+                )
+            except: pass
+            
+            current_referrer_id = referrer.referrer_id
+    except Exception as e:
+        logger.error(f"Ошибка реферальных бонусов: {e}")
+
+
 async def handle_crypto_webhook_update(data: Dict[str, Any], bot: Bot) -> Dict[str, str]:
     logger.info("=" * 50)
     logger.info("🪙 CRYPTO WEBHOOK получен")
@@ -213,6 +244,9 @@ async def _process_traffic_payment(session, bot, user, invoice, amount, traffic_
     except: pass
     
     logger.info(f"Трафик +{traffic_gb}ГБ для {user_id}")
+    
+    # Реферальные бонусы
+    await _process_referrer_bonuses(session, bot, user, amount, "докупил трафик")
     return True
 
 
@@ -258,6 +292,9 @@ async def _process_gift_payment(session, bot, user, invoice, amount, tier, days,
                 parse_mode="HTML")
     except: pass
     logger.info(f"Подарок {code} создан для {user_id}")
+    
+    # Реферальные бонусы
+    await _process_referrer_bonuses(session, bot, user, amount, "купил VPN в подарок")
     return True
 
 
