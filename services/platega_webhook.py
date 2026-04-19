@@ -151,6 +151,14 @@ async def _process_traffic_payment(session, bot, user, invoice, amount, traffic_
         f"💰 Сумма: <b>{amount:.2f} RUB</b>",
         parse_mode="HTML"
     )
+    try:
+        for admin_id in settings.admin_ids_list:
+            await bot.send_message(admin_id,
+                f"📦 <b>Докупка трафика (Platega)</b>\n"
+                f"ID: <code>{user_id}</code>\n"
+                f"+{traffic_gb} ГБ за {amount:.0f}₽",
+                parse_mode="HTML")
+    except: pass
     return True
 
 
@@ -183,6 +191,15 @@ async def _process_gift_payment(session, bot, user, invoice, amount, tier, days,
         f"⏳ Код действителен <b>30 дней</b>.",
         parse_mode="HTML"
     )
+    try:
+        for admin_id in settings.admin_ids_list:
+            await bot.send_message(admin_id,
+                f"🎁 <b>Подарок оплачен (Platega)</b>\n"
+                f"ID: <code>{user_id}</code>\n"
+                f"Тариф: {'VIP' if tier == 'premium' else 'Стандарт'}, {days} дней\n"
+                f"Сумма: {amount:.0f}₽",
+                parse_mode="HTML")
+    except: pass
     return True
 
 
