@@ -139,6 +139,7 @@ async def show_profile(callback_or_message: types.CallbackQuery | types.Message,
         profile_text += f"<b>Username:</b> @{user.username}\n"
 
     profile_text += f"💰 <b>Баланс:</b> {user.balance:.2f} ₽\n"
+    profile_text += f"🎁 <b>Реферальный баланс:</b> {user.referral_balance:.2f} ₽\n"
 
     if user.expire_date:
         now = datetime.utcnow()

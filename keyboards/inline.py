@@ -302,7 +302,7 @@ def get_gift_tier_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
     builder.button(text="🛡 Обычный VPN — 150₽/мес", callback_data="gift_standard", style="primary")
-    builder.button(text="🚀 VIP (Обход белых списков) — 300₽/мес", callback_data="gift_premium", style="primary")
+    builder.button(text="🚀 VIP (Обход белых списков) — от 400₽/мес", callback_data="gift_premium", style="primary")
     builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
     
     builder.adjust(1, 1, 1)

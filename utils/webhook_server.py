@@ -770,7 +770,22 @@ class WebhookHandler:
 
                 # Обновляем Marzban
                 try:
-                    gb_limit_val = user.gb_limit or 0
+                    # Рассчитываем ГБ для этого срока
+                    GB_LIMITS_MAP = {30: 100, 90: 350, 180: 800, 365: 2048}
+                    new_gb = GB_LIMITS_MAP.get(days, days * 3)
+                    
+                    # Получаем текущий used_traffic из Marzban
+                    current_used_gb = 0
+                    if user.marzban_username:
+                        try:
+                            mdata = await marzban_service.get_user(user.marzban_username)
+                            if mdata:
+                                current_used_gb = (mdata.get("used_traffic", 0) or 0) / (1024**3)
+                        except: pass
+                    
+                    gb_limit_val = current_used_gb + new_gb
+                    user.gb_limit = gb_limit_val
+                    
                     if user.marzban_username:
                         marzban_data = await marzban_service.get_user(user.marzban_username)
                         if marzban_data:

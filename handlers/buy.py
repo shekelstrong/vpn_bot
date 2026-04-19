@@ -353,36 +353,11 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, sta
 
 @router.callback_query(F.data.startswith("tier_"))
 async def select_tier(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Выбор тарифа и отображение сроков (или Web App для VIP)."""
+    """Выбор тарифа и отображение сроков."""
     tier = callback.data.replace("tier_", "")
     await state.update_data(tier=tier)
+    await callback.answer()
     
-    if tier == "premium":
-        text = (
-            "🚀 <b>Обход белых списков (VIP)</b>\n\n"
-            "Для оформления данного тарифа, выбора выгодного лимита гигабайт и количества устройств, "
-            "пожалуйста, перейдите в наше удобное Mini App 👇"
-        )
-        
-        webapp_url = "https://nemo-vpn-webapp.vercel.app/" 
-        
-        keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="📱 Открыть Mini App", web_app=types.WebAppInfo(url=webapp_url))],
-            [types.InlineKeyboardButton(text="« Назад", callback_data="buy")]
-        ])
-        
-        try:
-            if callback.message.video or callback.message.animation or callback.message.photo:
-                await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
-            else:
-                await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
-        except Exception as e:
-            logger.error(f"Ошибка редактирования меню VIP Mini App (пробуем новое сообщение): {e}")
-            await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
-            
-        await callback.answer()
-        return
-
     if tier == "premium":
         base_price_str = await get_db_setting(session, "premium_subscription_price", str(settings.PREMIUM_PRICE_RUB))
         price_test = 100
@@ -406,18 +381,15 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
         price_test=price_test
     )
 
-    text = "⏱ <b>Выберите срок подписки:</b>"
+    tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+    text = f"{tier_name}\n\n⏱ <b>Выберите срок подписки:</b>"
 
     try:
-        if callback.message.video or callback.message.animation or callback.message.photo:
-            await callback.message.edit_caption(caption=text, reply_markup=keyboard, parse_mode="HTML")
-        else:
-            await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Ошибка редактирования меню сроков: {e}")
+        await callback.message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
+    except:
+        await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
 
     await state.set_state(BuySubscription.selecting_duration)
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("duration_"))
