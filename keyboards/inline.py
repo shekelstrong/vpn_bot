@@ -206,6 +206,28 @@ def get_back_keyboard(callback_data: str = "back_to_main") -> InlineKeyboardMark
     return builder.as_markup()
 
 # =====================================================================
+# ТРАФИК — пакеты и клавиатуры
+# =====================================================================
+
+TRAFFIC_PACKAGES = [
+    {"gb": 50, "price": 50},
+    {"gb": 100, "price": 90},
+    {"gb": 300, "price": 250},
+    {"gb": 500, "price": 400},
+]
+
+
+def get_traffic_payment_keyboard(gb: int, price: int) -> InlineKeyboardMarkup:
+    """Клавиатура выбора способа оплаты для докупки трафика."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="₿ Крипто", callback_data=f"tpay_crypto_{gb}_{price}")
+    builder.button(text="💳 Карта / СБП", callback_data=f"tpay_card_{gb}_{price}")
+    builder.button(text="Назад ↩️", callback_data="traffic_buy")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+# =====================================================================
 # НОВЫЕ И ИЗМЕНЕННЫЕ КЛАВИАТУРЫ ДЛЯ ТАРИФОВ, ТРАФИКА, ПОДАРКОВ И АДМИНКИ
 # =====================================================================
 
@@ -307,6 +329,16 @@ def get_gift_duration_keyboard(tier: str) -> InlineKeyboardMarkup:
     builder.button(text="Назад ↩️", callback_data="gift_start", style="danger")
     
     builder.adjust(1, 1, 1, 1, 1)
+    return builder.as_markup()
+
+
+def get_gift_payment_keyboard(tier: str, days: int, price: int) -> InlineKeyboardMarkup:
+    """Клавиатура выбора способа оплаты для подарка."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="₿ Крипто", callback_data=f"gpay_crypto_{tier}_{days}_{price}")
+    builder.button(text="💳 Карта / СБП", callback_data=f"gpay_card_{tier}_{days}_{price}")
+    builder.button(text="Назад ↩️", callback_data="gift_start")
+    builder.adjust(2)
     return builder.as_markup()
 
 
