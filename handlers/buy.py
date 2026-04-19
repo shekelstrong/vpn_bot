@@ -54,13 +54,15 @@ async def traffic_buy_callback(callback: types.CallbackQuery, session: AsyncSess
         )
         return
     
-    await callback.message.edit_text(
+    text = (
         "📦 <b>Докупка трафика</b>\n\n"
         "Выберите пакет дополнительного трафика.\n"
-        "Трафик будет добавлен к вашему текущему лимиту.",
-        reply_markup=get_traffic_buy_keyboard(),
-        parse_mode="HTML"
+        "Трафик будет добавлен к вашему текущему лимиту."
     )
+    try:
+        await callback.message.edit_text(text, reply_markup=get_traffic_buy_keyboard(), parse_mode="HTML")
+    except:
+        await callback.message.answer(text, reply_markup=get_traffic_buy_keyboard(), parse_mode="HTML")
 
 
 @router.callback_query(F.data.startswith("traffic_") & ~F.data.endswith("buy"))
