@@ -980,6 +980,71 @@ class WebhookHandler:
             logger.error(f"API Buy Traffic Referral Error: {e}")
             return web.json_response({"error": str(e)}, status=500)
 
+    async def api_gift_referral(self, request: web.Request) -> web.Response:
+        """Подарок из реферального баланса."""
+        try:
+            data = await request.json()
+            tg_id = int(data.get("tg_id"))
+            tier = data.get("tier", "premium")
+            days = int(data.get("days", 30))
+            amount = float(data.get("amount", 300))
+            
+            logger.info(f"🎁 Подарок из реф баланса: {tg_id}, {amount}₽, {tier}, {days}дн")
+            
+            async with get_session_factory()() as session:
+                result = await session.execute(select(User).where(User.user_id == tg_id))
+                user = result.scalar_one_or_none()
+                if not user:
+                    return web.json_response({"error": "Пользователь не найден"}, status=404)
+                if user.referral_balance < amount:
+                    return web.json_response({"error": f"Недостаточно средств. Баланс: {user.referral_balance:.0f}₽"}, status=400)
+                
+                user.referral_balance -= amount
+                
+                # Create gift code
+                import uuid
+                from database.models import Transaction, GiftCode
+                code = str(uuid.uuid4())
+                gb = 0 if tier == "standard" else {30: 100, 90: 350, 180: 800, 365: 2048}.get(days, days * 3)
+                gift = GiftCode(code=code, creator_id=tg_id, tier=tier, days=days, gb_limit=gb,
+                    expires_at=datetime.utcnow() + timedelta(days=30))
+                session.add(gift)
+                
+                txn = Transaction(user_id=tg_id, amount=amount, currency="RUB",
+                    payment_method="referral_balance_gift", status="paid",
+                    payment_id=f"ref_gift_{uuid.uuid4().hex[:8]}",
+                    description=f"Подарок из реф баланса ({tier}, {days}дн)")
+                session.add(txn)
+                await session.commit()
+                
+                bot_info = await self.bot.get_me()
+                gift_link = f"https://t.me/{bot_info.username}?start=gift_{code}"
+                
+                # Notify user
+                try:
+                    await self.bot.send_message(tg_id,
+                        f"🎁 <b>Подарок оплачен из реферального баланса!</b>\n\n"
+                        f"Списано: {amount:.0f}₽\n"
+                        f"Ссылка для друга: <code>{gift_link}</code>",
+                        parse_mode="HTML")
+                except: pass
+                
+                # Notify admins
+                try:
+                    for admin_id in settings.admin_ids_list:
+                        await self.bot.send_message(admin_id,
+                            f"🎁 <b>Подарок (реф баланс)</b>\n"
+                            f"ID: <code>{tg_id}</code>\n"
+                            f"Тариф: {'VIP' if tier == 'premium' else 'Стандарт'}, {days} дней\n"
+                            f"Сумма: {amount:.0f}₽",
+                            parse_mode="HTML")
+                except: pass
+                
+                return web.json_response({"status": "success", "gift_link": gift_link, "code": code})
+        except Exception as e:
+            logger.error(f"API Gift Referral Error: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
 
 async def run_webhooks(bot=None):
     """Функция запуска веб-сервера."""
@@ -1010,6 +1075,7 @@ async def run_webhooks(bot=None):
     # === НОВЫЕ РОУТЫ: TRAFFIC / GIFT / REFERRAL ===
     app.router.add_post('/api/buy_traffic', handler.api_buy_traffic)
     app.router.add_post('/api/buy_traffic_referral', handler.api_buy_traffic_referral)
+    app.router.add_post('/api/gift_referral', handler.api_gift_referral)
     app.router.add_post('/api/create_gift', handler.api_create_gift)
     app.router.add_post('/api/pay_referral', handler.api_pay_referral)
     # ============================================
