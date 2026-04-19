@@ -237,13 +237,29 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
             except: pass
 
         if marzban_account_exists:
-            await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier)
+            # Для VIP — рассчитываем ГБ лимит кумулятивно
+            gb_limit = 0
+            if tier == "premium":
+                GB_MAP = {3: 3, 30: 100, 90: 350, 180: 800, 365: 2048}
+                new_gb = GB_MAP.get(days, days * 3)
+                current_used_gb = 0
+                if marzban_data:
+                    current_used_gb = (marzban_data.get("used_traffic", 0) or 0) / (1024**3)
+                gb_limit = current_used_gb + new_gb
+                user.gb_limit = gb_limit
+            await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier, data_limit_gb=gb_limit)
         else:
+            # Новый пользователь
+            gb_new = 0
+            if tier == "premium":
+                GB_MAP = {3: 3, 30: 100, 90: 350, 180: 800, 365: 2048}
+                gb_new = GB_MAP.get(days, days * 3)
+                user.gb_limit = gb_new
             new_acc = await marzban_service.create_user(
                 tg_id=user.user_id,
                 username=user.username,
                 expire_days=days,
-                data_limit_gb=0.0,
+                data_limit_gb=gb_new,
                 tier=tier
             )
             user.marzban_username = new_acc.get('username')

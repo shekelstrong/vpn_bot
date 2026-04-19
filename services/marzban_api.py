@@ -205,9 +205,10 @@ class MarzbanService:
         self,
         marzban_username: str,
         extra_days: int,
-        tier: str = "standard"
+        tier: str = "standard",
+        data_limit_gb: float = 0
     ) -> Dict[str, Any]:
-        """Продлить подписку пользователя и снять ограничения триала."""
+        """Продлить подписку пользователя."""
         user = await self.get_user(marzban_username)
         if not user:
             raise ValueError(f"Пользователь {marzban_username} не найден в Marzban для продления")
@@ -215,23 +216,29 @@ class MarzbanService:
         current_expire = user.get("expire") or 0
         current_time = int(datetime.utcnow().timestamp())
         
-        # Если подписка еще активна, плюсуем к ней. Если уже истекла - отсчитываем от сейчас!
         if current_expire > current_time:
             new_expire = current_expire + (extra_days * 24 * 60 * 60)
         else:
             new_expire = current_time + (extra_days * 24 * 60 * 60)
 
-        # Переводим на нужный инбаунд, если юзер сменил тариф
         if tier == "premium":
             proxies = {"vless": {"flow": "xtls-rprx-vision"}}
             inbounds = {"vless": ["vless-reality-whitelist"]}
         else:
             proxies = {"vless": {"flow": ""}}
             inbounds = {"vless": ["vless-reality-standard"]}
+        
+        # Рассчитываем data_limit
+        current_used = user.get("used_traffic", 0) or 0
+        if data_limit_gb > 0:
+            # VIP: кумулятивный лимит = used + new_gb
+            new_data_limit = int(current_used + data_limit_gb * 1024**3)
+        else:
+            new_data_limit = 0  # Безлимит (стандарт)
             
         update_data = {
             "expire": new_expire,
-            "data_limit": 0,  # Снимаем триальный лимит по трафику (устанавливаем безлимит)
+            "data_limit": new_data_limit,
             "status": "active",  # Принудительно активируем аккаунт, если он был отключен
             "proxies": proxies,
             "inbounds": inbounds
