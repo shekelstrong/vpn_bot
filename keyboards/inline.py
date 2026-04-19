@@ -310,21 +310,19 @@ def get_gift_tier_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_gift_duration_keyboard(tier: str) -> InlineKeyboardMarkup:
-    """
-    Клавиатура выбора срока подарочной подписки.
-    """
+    """Клавиатура выбора срока подарочной подписки с GB лимитами."""
     builder = InlineKeyboardBuilder()
     
     if tier == "premium":
-        builder.button(text="1 месяц — 300₽", callback_data="gift_dur_30", style="primary")
-        builder.button(text="3 месяца — 800₽", callback_data="gift_dur_90", style="primary")
-        builder.button(text="6 месяцев — 1400₽", callback_data="gift_dur_180", style="primary")
-        builder.button(text="12 месяцев — 2500₽", callback_data="gift_dur_365", style="primary")
+        builder.button(text="1 месяц — 300₽ (100 ГБ)", callback_data="gift_dur_30", style="primary")
+        builder.button(text="3 месяца — 810₽ (350 ГБ)", callback_data="gift_dur_90", style="primary")
+        builder.button(text="6 месяцев — 1494₽ (800 ГБ)", callback_data="gift_dur_180", style="primary")
+        builder.button(text="12 месяцев — 2700₽ (2 ТБ)", callback_data="gift_dur_365", style="primary")
     else:
-        builder.button(text="1 месяц — 150₽", callback_data="gift_dur_30", style="primary")
-        builder.button(text="3 месяца — 400₽", callback_data="gift_dur_90", style="primary")
-        builder.button(text="6 месяцев — 700₽", callback_data="gift_dur_180", style="primary")
-        builder.button(text="12 месяцев — 1200₽", callback_data="gift_dur_365", style="primary")
+        builder.button(text="1 месяц — 100₽ (100 ГБ)", callback_data="gift_dur_30", style="primary")
+        builder.button(text="3 месяца — 270₽ (350 ГБ)", callback_data="gift_dur_90", style="primary")
+        builder.button(text="6 месяцев — 498₽ (800 ГБ)", callback_data="gift_dur_180", style="primary")
+        builder.button(text="12 месяцев — 900₽ (2 ТБ)", callback_data="gift_dur_365", style="primary")
     
     builder.button(text="Назад ↩️", callback_data="gift_start", style="danger")
     
