@@ -242,11 +242,12 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
             if tier == "premium":
                 GB_MAP = {3: 3, 30: 100, 90: 350, 180: 800, 365: 2048}
                 new_gb = GB_MAP.get(days, days * 3)
-                current_used_gb = 0
+                # Берём текущий data_limit из Marzban
+                current_limit_gb = user.gb_limit or 0
                 if marzban_data:
-                    current_used_gb = (marzban_data.get("used_traffic", 0) or 0) / (1024**3)
-                gb_limit = current_used_gb + new_gb
-                user.gb_limit = gb_limit
+                    current_limit_gb = (marzban_data.get("data_limit", 0) or 0) / (1024**3)
+                gb_limit = new_gb  # update_user_expiry сам прибавит к used_traffic
+                user.gb_limit = current_limit_gb + new_gb
             await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier, data_limit_gb=gb_limit)
         else:
             # Новый пользователь

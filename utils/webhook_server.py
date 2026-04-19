@@ -774,17 +774,17 @@ class WebhookHandler:
                     GB_LIMITS_MAP = {30: 100, 90: 350, 180: 800, 365: 2048}
                     new_gb = GB_LIMITS_MAP.get(days, days * 3)
                     
-                    # Получаем текущий used_traffic из Marzban
-                    current_used_gb = 0
+                    # Получаем текущий data_limit из Marzban
+                    current_limit_gb = user.gb_limit or 0
                     if user.marzban_username:
                         try:
                             mdata = await marzban_service.get_user(user.marzban_username)
                             if mdata:
-                                current_used_gb = (mdata.get("used_traffic", 0) or 0) / (1024**3)
+                                current_limit_gb = (mdata.get("data_limit", 0) or 0) / (1024**3)
                         except: pass
                     
-                    gb_limit_val = current_used_gb + new_gb
-                    user.gb_limit = gb_limit_val
+                    gb_limit_val = new_gb  # Новые ГБ — update_user_full прибавит к used_traffic
+                    user.gb_limit = current_limit_gb + new_gb  # В базе храним полный лимит
                     
                     if user.marzban_username:
                         marzban_data = await marzban_service.get_user(user.marzban_username)
@@ -924,23 +924,22 @@ class WebhookHandler:
                 # Confirm handled on frontend
                 user.referral_balance -= price
                 
-                # Add GB cumulatively
-                current_used_gb = 0
+                # Add GB cumulatively: берём текущий data_limit из Marzban
+                current_limit_gb = user.gb_limit or 0
                 if user.marzban_username:
                     try:
                         mdata = await marzban_service.get_user(user.marzban_username)
                         if mdata:
-                            current_used_gb = (mdata.get("used_traffic", 0) or 0) / (1024**3)
+                            current_limit_gb = (mdata.get("data_limit", 0) or 0) / (1024**3)
                     except: pass
                 
-                new_limit_gb = current_used_gb + gb
+                new_limit_gb = current_limit_gb + gb
                 user.gb_limit = new_limit_gb
                 
                 # Update Marzban
                 if user.marzban_username:
                     try:
-                        new_limit_bytes = int(new_limit_gb * 1024**3)
-                        await marzban_service.update_user_data_limit(user.marzban_username, new_limit_bytes)
+                        await marzban_service.update_user_data_limit(user.marzban_username, new_limit_gb)
                     except Exception as e:
                         logger.error(f"Marzban error traffic topup: {e}")
                 
