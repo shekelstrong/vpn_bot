@@ -158,8 +158,8 @@ async def gift_select_duration(callback: types.CallbackQuery, state: FSMContext)
     tier = data.get("gift_tier", "premium")
     
     GIFT_PRICES = {
-        ("premium", 30): 300, ("premium", 90): 800,
-        ("premium", 180): 1400, ("premium", 365): 2500,
+        ("premium", 30): 400, ("premium", 90): 1050,
+        ("premium", 180): 1900, ("premium", 365): 3500,
         ("standard", 30): 150, ("standard", 90): 400,
         ("standard", 180): 700, ("standard", 365): 1200,
     }

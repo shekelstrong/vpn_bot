@@ -314,15 +314,15 @@ def get_gift_duration_keyboard(tier: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     
     if tier == "premium":
-        builder.button(text="1 месяц — 300₽ (100 ГБ)", callback_data="gift_dur_30", style="primary")
-        builder.button(text="3 месяца — 810₽ (350 ГБ)", callback_data="gift_dur_90", style="primary")
-        builder.button(text="6 месяцев — 1494₽ (800 ГБ)", callback_data="gift_dur_180", style="primary")
-        builder.button(text="12 месяцев — 2700₽ (2 ТБ)", callback_data="gift_dur_365", style="primary")
+        builder.button(text="1 месяц — 400₽ (100 ГБ)", callback_data="gift_dur_30", style="primary")
+        builder.button(text="3 месяца — 1050₽ (350 ГБ)", callback_data="gift_dur_90", style="primary")
+        builder.button(text="6 месяцев — 1900₽ (800 ГБ)", callback_data="gift_dur_180", style="primary")
+        builder.button(text="12 месяцев — 3500₽ (2 ТБ)", callback_data="gift_dur_365", style="primary")
     else:
-        builder.button(text="1 месяц — 100₽ (100 ГБ)", callback_data="gift_dur_30", style="primary")
-        builder.button(text="3 месяца — 270₽ (350 ГБ)", callback_data="gift_dur_90", style="primary")
-        builder.button(text="6 месяцев — 498₽ (800 ГБ)", callback_data="gift_dur_180", style="primary")
-        builder.button(text="12 месяцев — 900₽ (2 ТБ)", callback_data="gift_dur_365", style="primary")
+        builder.button(text="1 месяц — 150₽ (100 ГБ)", callback_data="gift_dur_30", style="primary")
+        builder.button(text="3 месяца — 400₽ (350 ГБ)", callback_data="gift_dur_90", style="primary")
+        builder.button(text="6 месяцев — 700₽ (800 ГБ)", callback_data="gift_dur_180", style="primary")
+        builder.button(text="12 месяцев — 1200₽ (2 ТБ)", callback_data="gift_dur_365", style="primary")
     
     builder.button(text="Назад ↩️", callback_data="gift_start", style="danger")
     
