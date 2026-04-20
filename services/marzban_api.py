@@ -257,6 +257,32 @@ class MarzbanService:
             logger.error(f"Ошибка продления подписки {marzban_username}: {e}")
             raise
 
+    async def extend_user_expiry_light(self, marzban_username: str, extra_days: int) -> Dict[str, Any]:
+        """Лёгкое продление подписки: обновляет ТОЛЬКО expire.
+        Не трогает proxies, inbounds, data_limit, не сбрасывает трафик.
+        Безопасно для активных подключений — не вызывает обрыв."""
+        user = await self.get_user(marzban_username)
+        if not user:
+            raise ValueError(f"Пользователь {marzban_username} не найден")
+
+        current_expire = user.get("expire") or 0
+        current_time = int(datetime.utcnow().timestamp())
+
+        if current_expire > current_time:
+            new_expire = current_expire + (extra_days * 24 * 60 * 60)
+        else:
+            new_expire = current_time + (extra_days * 24 * 60 * 60)
+
+        update_data = {"expire": new_expire}
+
+        try:
+            result = await self._request("PUT", f"/user/{marzban_username}", json=update_data)
+            logger.info(f"Лёгкое продление {marzban_username}: +{extra_days} дней (expire only)")
+            return result
+        except Exception as e:
+            logger.error(f"Ошибка лёгкого продления {marzban_username}: {e}")
+            raise
+
     async def update_user_ip_limit(self, marzban_username: str, device_count: int) -> Dict[str, Any]:
         """Обновить лимит устройств (ip_limit) пользователя в Marzban.
         ip_limit ограничивает количество уникальных IP-адресов, с которых можно подключаться."""

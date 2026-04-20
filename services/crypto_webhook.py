@@ -379,7 +379,7 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
                         referrer.expire_date = ref_now + timedelta(days=bonus_days)
                     if referrer.marzban_username:
                         try:
-                            await marzban_service.update_user_expiry(referrer.marzban_username, bonus_days, tier=referrer.tier)
+                            await marzban_service.extend_user_expiry_light(referrer.marzban_username, bonus_days)
                         except Exception as e:
                             logger.error(f"Ошибка бонусных дней: {e}")
                     bonus_days_msg = f"\n🎁 <b>Бонус за {referrer.refs_paid_count}-го друга:</b> +{bonus_days} дней VPN!"
