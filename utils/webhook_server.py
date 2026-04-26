@@ -586,6 +586,7 @@ class WebhookHandler:
             tier = data.get("tier", "premium") 
             device_count = int(data.get("device_count", 1))
             amount = float(data.get("amount", 300))
+            gb_limit = float(data.get("gb_limit", 0))
             
             logger.info(f"💰 Запрос на оплату с баланса: {tg_id}, сумма {amount} руб.")
 
@@ -628,30 +629,83 @@ class WebhookHandler:
                 )
                 session.add(transaction)
                 
-                # Продлеваем подписку в БД
+                # === РАЗДЕЛЬНЫЕ СРОКИ (как в webhooks.py) ===
                 now = datetime.utcnow()
-                if user.expire_date and user.expire_date > now:
-                    user.expire_date = user.expire_date + timedelta(days=days)
+                if tier == "premium":
+                    if user.expire_premium and user.expire_premium > now:
+                        user.expire_premium = user.expire_premium + timedelta(days=days)
+                    else:
+                        user.expire_premium = now + timedelta(days=days)
+                    if gb_limit > 0:
+                        user.gb_limit = gb_limit
                 else:
-                    user.expire_date = now + timedelta(days=days)
-                    
-                # Tier: не понижаем. Если уже premium — остаётся premium
+                    if user.expire_standard and user.expire_standard > now:
+                        user.expire_standard = user.expire_standard + timedelta(days=days)
+                    else:
+                        user.expire_standard = now + timedelta(days=days)
+
+                # Пересчитываем единый expire_date
+                user.recalculate_expire_date()
+                # Tier: не понижаем
                 if tier == "premium" or user.tier != "premium":
                     user.tier = tier
                 user.device_count = device_count
-                
-                # Обновляем Marzban
+
+                # === АКТИВНЫЕ INBOUNDS ===
+                active_inbounds = []
+                if user.expire_standard and user.expire_standard > now:
+                    active_inbounds.append("vless-reality-standard")
+                if user.expire_premium and user.expire_premium > now:
+                    active_inbounds.append("vless-reality-whitelist")
+
+                # === ОБНОВЛЯЕМ MARZBAN ===
                 try:
-                    gb_limit_val = user.gb_limit or 0
+                    marzban_account_exists = False
+                    marzban_data = None
                     if user.marzban_username:
-                        marzban_data = await marzban_service.get_user(user.marzban_username)
-                        if marzban_data:
-                            await marzban_service.update_user_full(user.marzban_username, extra_days=days, tier=tier, device_count=device_count, data_limit_gb=gb_limit_val)
+                        try:
+                            marzban_data = await marzban_service.get_user(user.marzban_username)
+                            if marzban_data:
+                                marzban_account_exists = True
+                        except:
+                            pass
+
+                    if marzban_account_exists:
+                        current_used = (marzban_data or {}).get("used_traffic", 0) or 0
+
+                        # data_limit — ТОЛЬКО для premium
+                        new_data_limit = None
+                        if user.expire_premium and user.expire_premium > now and user.gb_limit and user.gb_limit > 0:
+                            new_data_limit = int(current_used + user.gb_limit * 1024**3)
+
+                        proxies = {"vless": {"flow": ""}}
+                        if "vless-reality-whitelist" in active_inbounds:
+                            proxies = {"vless": {"flow": "xtls-rprx-vision"}}
+
+                        total_days = 0
+                        if user.expire_date and user.expire_date > now:
+                            total_days = (user.expire_date - now).days
                         else:
-                            new_acc = await marzban_service.create_user(tg_id, user.username, days, data_limit_gb=gb_limit_val, tier=tier, device_count=device_count)
-                            user.marzban_username = new_acc.get('username')
+                            total_days = days
+
+                        update_data = {
+                            "expire": int((now + timedelta(days=total_days)).timestamp()),
+                            "status": "active",
+                            "proxies": proxies,
+                            "inbounds": {"vless": active_inbounds},
+                            "ip_limit": device_count,
+                        }
+                        if new_data_limit is not None:
+                            update_data["data_limit"] = new_data_limit
+
+                        await marzban_service._request("PUT", f"/user/{user.marzban_username}", json=update_data)
+                        logger.info(f"Marzban обновлён [balance]: {user.marzban_username}, inbounds={active_inbounds}, +{total_days}д")
                     else:
-                        new_acc = await marzban_service.create_user(tg_id, user.username, days, data_limit_gb=gb_limit_val, tier=tier, device_count=device_count)
+                        gb_new = 0
+                        if tier == "premium":
+                            GB_MAP = {3: 3, 30: 100, 90: 350, 180: 800, 365: 2048}
+                            gb_new = GB_MAP.get(days, days * 3)
+                        new_acc = await marzban_service.create_user(tg_id, user.username, days, data_limit_gb=gb_new, tier=tier, device_count=device_count)
                         user.marzban_username = new_acc.get('username')
                 except Exception as e:
                     logger.error(f"Ошибка Marzban при оплате с баланса: {e}")
@@ -1012,55 +1066,82 @@ class WebhookHandler:
                 )
                 session.add(transaction)
 
-                # Продлеваем подписку
+                # === РАЗДЕЛЬНЫЕ СРОКИ (как в webhooks.py) ===
                 now = datetime.utcnow()
-                if user.expire_date and user.expire_date > now:
-                    user.expire_date = user.expire_date + timedelta(days=days)
+                if tier == "premium":
+                    if user.expire_premium and user.expire_premium > now:
+                        user.expire_premium = user.expire_premium + timedelta(days=days)
+                    else:
+                        user.expire_premium = now + timedelta(days=days)
                 else:
-                    user.expire_date = now + timedelta(days=days)
+                    if user.expire_standard and user.expire_standard > now:
+                        user.expire_standard = user.expire_standard + timedelta(days=days)
+                    else:
+                        user.expire_standard = now + timedelta(days=days)
 
-                # Tier: не понижаем. Если уже premium — остаётся premium
+                # Пересчитываем единый expire_date
+                user.recalculate_expire_date()
+                # Tier: не понижаем
                 if tier == "premium" or user.tier != "premium":
                     user.tier = tier
 
-                # Обновляем Marzban
+                # === АКТИВНЫЕ INBOUNDS ===
+                active_inbounds = []
+                if user.expire_standard and user.expire_standard > now:
+                    active_inbounds.append("vless-reality-standard")
+                if user.expire_premium and user.expire_premium > now:
+                    active_inbounds.append("vless-reality-whitelist")
+
+                # === ОБНОВЛЯЕМ MARZBAN ===
                 try:
-                    # Рассчитываем ГБ для этого срока
-                    GB_LIMITS_MAP = {30: 100, 90: 350, 180: 800, 365: 2048}
-                    new_gb = GB_LIMITS_MAP.get(days, days * 3)
-                    
-                    # Получаем текущий data_limit из Marzban
-                    current_limit_gb = user.gb_limit or 0
+                    marzban_account_exists = False
+                    marzban_data = None
                     if user.marzban_username:
                         try:
-                            mdata = await marzban_service.get_user(user.marzban_username)
-                            if mdata:
-                                current_limit_gb = (mdata.get("data_limit", 0) or 0) / (1024**3)
-                        except: pass
-                    
-                    gb_limit_val = new_gb  # Новые ГБ — update_user_full прибавит к used_traffic
-                    user.gb_limit = current_limit_gb + new_gb  # В базе храним полный лимит
-                    
-                    if user.marzban_username:
-                        marzban_data = await marzban_service.get_user(user.marzban_username)
-                        if marzban_data:
-                            await marzban_service.update_user_full(
-                                user.marzban_username,
-                                extra_days=days,
-                                tier=tier,
-                                device_count=user.device_count,
-                                data_limit_gb=gb_limit_val
-                            )
+                            marzban_data = await marzban_service.get_user(user.marzban_username)
+                            if marzban_data:
+                                marzban_account_exists = True
+                        except:
+                            pass
+
+                    if marzban_account_exists:
+                        current_used = (marzban_data or {}).get("used_traffic", 0) or 0
+
+                        # data_limit — ТОЛЬКО для premium
+                        new_data_limit = None
+                        if user.expire_premium and user.expire_premium > now and user.gb_limit and user.gb_limit > 0:
+                            new_data_limit = int(current_used + user.gb_limit * 1024**3)
+
+                        proxies = {"vless": {"flow": ""}}
+                        if "vless-reality-whitelist" in active_inbounds:
+                            proxies = {"vless": {"flow": "xtls-rprx-vision"}}
+
+                        total_days = 0
+                        if user.expire_date and user.expire_date > now:
+                            total_days = (user.expire_date - now).days
                         else:
-                            new_acc = await marzban_service.create_user(
-                                tg_id, user.username, days,
-                                data_limit_gb=gb_limit_val, tier=tier, device_count=user.device_count
-                            )
-                            user.marzban_username = new_acc.get('username')
+                            total_days = days
+
+                        update_data = {
+                            "expire": int((now + timedelta(days=total_days)).timestamp()),
+                            "status": "active",
+                            "proxies": proxies,
+                            "inbounds": {"vless": active_inbounds},
+                            "ip_limit": user.device_count or 1,
+                        }
+                        if new_data_limit is not None:
+                            update_data["data_limit"] = new_data_limit
+
+                        await marzban_service._request("PUT", f"/user/{user.marzban_username}", json=update_data)
+                        logger.info(f"Marzban обновлён [referral]: {user.marzban_username}, inbounds={active_inbounds}, +{total_days}д")
                     else:
+                        gb_new = 0
+                        if tier == "premium":
+                            GB_MAP = {3: 3, 30: 100, 90: 350, 180: 800, 365: 2048}
+                            gb_new = GB_MAP.get(days, days * 3)
                         new_acc = await marzban_service.create_user(
                             tg_id, user.username, days,
-                            data_limit_gb=gb_limit_val, tier=tier, device_count=user.device_count
+                            data_limit_gb=gb_new, tier=tier, device_count=user.device_count
                         )
                         user.marzban_username = new_acc.get('username')
                 except Exception as e:
