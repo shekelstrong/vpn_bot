@@ -300,17 +300,26 @@ class MarzbanService:
         else:
             new_expire = current_expire
 
-        # Inbounds
+        # Inbounds — сохраняем существующие + добавляем новый tier
+        current_inbounds = user.get("inbounds", {}).get("vless", [])
+
         if inbounds:
+            # Явно переданные inbounds (админ/特殊 случаи)
             proxy_flow = "xtls-rprx-vision" if "vless-reality-whitelist" in inbounds else ""
             proxies = {"vless": {"flow": proxy_flow}}
             inbound_list = {"vless": inbounds}
         elif tier == "premium":
             proxies = {"vless": {"flow": "xtls-rprx-vision"}}
-            inbound_list = {"vless": ["vless-reality-whitelist"]}
+            # VIP всегда включает оба inbound-а
+            inbound_list = {"vless": ["vless-reality-whitelist", "vless-reality-standard"]}
         else:
-            proxies = {"vless": {"flow": ""}}
-            inbound_list = {"vless": ["vless-reality-standard"]}
+            # Standard — ДОБАВИТЬ к существующим, не удалять premium
+            merged = set(current_inbounds)
+            merged.add("vless-reality-standard")
+            has_whitelist = "vless-reality-whitelist" in merged
+            proxy_flow = "xtls-rprx-vision" if has_whitelist else ""
+            proxies = {"vless": {"flow": proxy_flow}}
+            inbound_list = {"vless": list(merged)}
 
         current_data_limit = user.get("data_limit") or 0
         current_used = user.get("used_traffic") or 0

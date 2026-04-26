@@ -635,7 +635,9 @@ class WebhookHandler:
                 else:
                     user.expire_date = now + timedelta(days=days)
                     
-                user.tier = tier
+                # Tier: не понижаем. Если уже premium — остаётся premium
+                if tier == "premium" or user.tier != "premium":
+                    user.tier = tier
                 user.device_count = device_count
                 
                 # Обновляем Marzban
@@ -1017,7 +1019,9 @@ class WebhookHandler:
                 else:
                     user.expire_date = now + timedelta(days=days)
 
-                user.tier = tier
+                # Tier: не понижаем. Если уже premium — остаётся premium
+                if tier == "premium" or user.tier != "premium":
+                    user.tier = tier
 
                 # Обновляем Marzban
                 try:
