@@ -38,7 +38,7 @@ def get_profile_keyboard(
     builder.button(text="Реферальная программа 👥", callback_data="referral", style="primary")
     if has_subscription:
         builder.button(text="Продлить подписку 💳", callback_data="buy_extend", style="primary")
-    builder.button(text="🔄 Перегенерировать ключ", callback_data="regenerate_key", style="primary")
+    builder.button(text="🔄 Перегенерировать ключ", callback_data="confirm_regenerate", style="primary")
     builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
     builder.adjust(1, 1)
     return builder.as_markup()

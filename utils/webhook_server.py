@@ -75,6 +75,79 @@ class WebhookHandler:
             logger.error(f"Platega Webhook Error: {e}")
             return web.json_response({"status": "error"}, status=400)
 
+    async def api_regenerate_key(self, request: web.Request) -> web.Response:
+        """Перегенерация VPN ключа через мини-апп."""
+        try:
+            data = await request.json()
+            tg_id = int(data.get("tg_id"))
+
+            async with get_session_factory()() as session:
+                result = await session.execute(select(User).where(User.user_id == tg_id))
+                user = result.scalar_one_or_none()
+                if not user:
+                    return web.json_response({"error": "Пользователь не найден"}, status=404)
+                if not user.marzban_username:
+                    return web.json_response({"error": "Нет активной подписки"}, status=400)
+
+                # Проверяем что аккаунт существует
+                marzban_data = await marzban_service.get_user(user.marzban_username)
+                if not marzban_data:
+                    # Аккаунт удалён — пересоздаём
+                    now = datetime.utcnow()
+                    days_left = 0
+                    if user.expire_date and user.expire_date > now:
+                        days_left = (user.expire_date - now).days + 1
+                    if days_left <= 0:
+                        return web.json_response({"error": "Подписка истекла"}, status=400)
+
+                    new_acc = await marzban_service.create_user(
+                        tg_id=tg_id, username=user.username,
+                        expire_days=days_left, data_limit_gb=user.gb_limit or 0,
+                        tier=user.tier or "standard", device_count=user.device_count or 1
+                    )
+                    user.marzban_username = new_acc.get('username')
+                    await session.commit()
+                    sub_url = new_acc.get("subscription_url", "")
+                    if sub_url and sub_url.startswith("/"):
+                        sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{sub_url}"
+                    return web.json_response({"status": "ok", "sub_url": sub_url, "message": "Аккаунт пересоздан"})
+
+                # Сохраняем данные до отзыва
+                current_expire = marzban_data.get("expire")
+                current_data_limit = marzban_data.get("data_limit")
+                current_ip_limit = marzban_data.get("ip_limit", 1)
+                current_inbounds = marzban_data.get("inbounds", {})
+
+                # Отзываем
+                try:
+                    await marzban_service.revoke_user_subscription(user.marzban_username)
+                except Exception as revoke_err:
+                    if "404" in str(revoke_err):
+                        return web.json_response({"error": "Аккаунт не найден. Оформите новую подписку."}, status=404)
+                    raise
+
+                # Восстанавливаем настройки
+                update_data = {"expire": current_expire, "status": "active"}
+                if current_data_limit:
+                    update_data["data_limit"] = current_data_limit
+                if current_ip_limit:
+                    update_data["ip_limit"] = current_ip_limit
+                if current_inbounds:
+                    update_data["inbounds"] = current_inbounds
+                await marzban_service._request("PUT", f"/user/{user.marzban_username}", json=update_data)
+
+                # Новая ссылка
+                new_data = await marzban_service.get_user(user.marzban_username)
+                sub_url = new_data.get("subscription_url", "")
+                if sub_url and sub_url.startswith("/"):
+                    sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{sub_url}"
+
+                return web.json_response({"status": "ok", "sub_url": sub_url})
+
+        except Exception as e:
+            logger.error(f"API regenerate_key error: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
     async def handle_pay_success(self, request: web.Request) -> web.Response:
         return web.Response(text="Оплата успешно завершена! Вы можете вернуться в бота.", content_type='text/html')
 
@@ -1102,6 +1175,7 @@ async def run_webhooks(bot=None):
     app.router.add_post('/api/gift_referral', handler.api_gift_referral)
     app.router.add_post('/api/create_gift', handler.api_create_gift)
     app.router.add_post('/api/pay_referral', handler.api_pay_referral)
+    app.router.add_post('/api/regenerate_key', handler.api_regenerate_key)
     # ============================================
 
     runner = web.AppRunner(app)

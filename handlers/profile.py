@@ -195,6 +195,26 @@ async def show_profile(callback_or_message: types.CallbackQuery | types.Message,
     )
 
 
+@router.callback_query(F.data == "confirm_regenerate")
+async def confirm_regenerate(callback: types.CallbackQuery, session: AsyncSession):
+    """Подтверждение перегенерации ключа."""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Да, перегенерировать", callback_data="regenerate_key")
+    builder.button(text="❌ Отмена", callback_data="profile")
+    builder.adjust(1)
+    await callback.message.edit_text(
+        "⚠️ <b>Перегенерация ключа</b>\n\n"
+        "Старая ссылка перестанет работать.\n"
+        "Вам придётся обновить подписку в Happ.\n\n"
+        "Срок подписки и ГБ сохраняются.\n\n"
+        "<b>Вы уверены?</b>",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "regenerate_key")
 async def regenerate_key(callback: types.CallbackQuery, session: AsyncSession):
     """Перегенерировать VPN ключ. Старая ссылка перестаёт работать, срок и ГБ сохраняются."""
@@ -207,20 +227,64 @@ async def regenerate_key(callback: types.CallbackQuery, session: AsyncSession):
         return
 
     try:
-        # Проверяем что аккаунт существует
+        # Проверяем что аккаунт существует и активен
         marzban_data = await marzban_service.get_user(user.marzban_username)
         if not marzban_data:
-            await callback.answer("Аккаунт заархивирован. Оформите новую подписку.", show_alert=True)
+            # Аккаунт заархивирован/удалён — пробуем пересоздать
+            await callback.answer("Аккаунт устарел. Оформите новую подписку.", show_alert=True)
             return
 
-        # Сохраняем текущие данные
+        # Сохраняем текущие данные ДО отзыва
         current_expire = marzban_data.get("expire")
         current_data_limit = marzban_data.get("data_limit")
         current_ip_limit = marzban_data.get("ip_limit", 1)
         current_inbounds = marzban_data.get("inbounds", {})
 
         # Отзываем подписку — генерирует новый ключ, старый перестаёт работать
-        await marzban_service.revoke_user_subscription(user.marzban_username)
+        try:
+            await marzban_service.revoke_user_subscription(user.marzban_username)
+        except Exception as revoke_err:
+            # Если 404 — аккаунт был удалён, нужно пересоздать
+            if "404" in str(revoke_err):
+                logger.warning(f"Аккаунт {user.marzban_username} не найден в Marzban, пересоздаём")
+                # Создаём новый аккаунт
+                now = datetime.utcnow()
+                days_left = 0
+                if user.expire_date and user.expire_date > now:
+                    days_left = (user.expire_date - now).days + 1
+
+                if days_left <= 0:
+                    await callback.answer("Подписка истекла. Оформите новую.", show_alert=True)
+                    return
+
+                new_acc = await marzban_service.create_user(
+                    tg_id=user_id,
+                    username=user.username,
+                    expire_days=days_left,
+                    data_limit_gb=user.gb_limit or 0,
+                    tier=user.tier or "standard",
+                    device_count=user.device_count or 1
+                )
+                user.marzban_username = new_acc.get('username')
+                await session.commit()
+
+                new_sub_url = new_acc.get("subscription_url", "")
+                if new_sub_url and new_sub_url.startswith("/"):
+                    new_sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{new_sub_url}"
+
+                await callback.message.edit_text(
+                    f"🔄 <b>Ключ пересоздан!</b>\n\n"
+                    f"Старый аккаунт был удалён, создан новый.\n\n"
+                    f"🔗 <b>Новый ключ подписки:</b>\n"
+                    f"<code>{new_sub_url}</code>\n\n"
+                    f"Обновите подписку в Happ.\n"
+                    f"Срок подписки и лимит ГБ сохранены.",
+                    parse_mode="HTML"
+                )
+                logger.info(f"Пользователь {user_id} пересоздал аккаунт (404)")
+                return
+            else:
+                raise
 
         # Восстанавливаем настройки (revoke может сбросить некоторые поля)
         update_data = {
@@ -240,12 +304,9 @@ async def regenerate_key(callback: types.CallbackQuery, session: AsyncSession):
         new_data = await marzban_service.get_user(user.marzban_username)
         new_sub_url = new_data.get("subscription_url", "")
         if new_sub_url and new_sub_url.startswith("/"):
-            base_url = settings.MARZBAN_URL.rstrip("/")
-            new_sub_url = f"{base_url}{new_sub_url}"
+            new_sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{new_sub_url}"
 
-        await callback.answer("✅ Ключ перегенерирован!", show_alert=False)
-
-        await callback.message.answer(
+        await callback.message.edit_text(
             f"🔄 <b>Ключ перегенерирован!</b>\n\n"
             f"Старая ссылка больше не работает.\n\n"
             f"🔗 <b>Новый ключ подписки:</b>\n"
