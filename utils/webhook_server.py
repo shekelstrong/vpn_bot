@@ -183,6 +183,19 @@ class WebhookHandler:
                     delta = user.expire_date - datetime.utcnow()
                     days_left = delta.days
 
+                # Раздельные сроки подписок
+                now = datetime.utcnow()
+                standard_days = 0
+                premium_days = 0
+                standard_expire = None
+                premium_expire = None
+                if user.expire_standard and user.expire_standard > now:
+                    standard_days = (user.expire_standard - now).days
+                    standard_expire = user.expire_standard.strftime('%d.%m.%Y')
+                if user.expire_premium and user.expire_premium > now:
+                    premium_days = (user.expire_premium - now).days
+                    premium_expire = user.expire_premium.strftime('%d.%m.%Y')
+
                 bot_info = await self.bot.get_me()
                 ref_link = f"https://t.me/{bot_info.username}?start={user.user_id}"
 
@@ -193,6 +206,10 @@ class WebhookHandler:
                         "username": user.username or "Пользователь",
                         "tier": user.tier,
                         "days_left": days_left,
+                        "standard_days": standard_days,
+                        "standard_expire": standard_expire,
+                        "premium_days": premium_days,
+                        "premium_expire": premium_expire,
                         "device_count": user.device_count,
                         "gb_limit": user.gb_limit or 0,
                         "used_traffic": used_traffic_gb,
