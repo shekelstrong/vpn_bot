@@ -212,7 +212,7 @@ async def _process_gift_payment(session, bot, user, invoice, amount, tier, days,
     return True
 
 
-async def _process_subscription_payment(session, bot, user, invoice, amount, days, tier, device_count, gb_limit) -> bool:
+async def _process_subscription_payment(session, bot, user, invoice, amount, days, tier, device_count, gb_limit, currency="RUB") -> bool:
     user_telegram_id = user.user_id
 
     prev_paid_tx = await session.execute(
@@ -230,11 +230,20 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
 
     now = datetime.utcnow()
     is_extension = bool(user.expire_date and user.expire_date > now)
-    if is_extension:
-        user.expire_date = user.expire_date + timedelta(days=days)
-    else:
-        user.expire_date = now + timedelta(days=days)
 
+    # Раздельные сроки по тарифам
+    if tier == "premium":
+        if user.expire_premium and user.expire_premium > now:
+            user.expire_premium = user.expire_premium + timedelta(days=days)
+        else:
+            user.expire_premium = now + timedelta(days=days)
+    else:
+        if user.expire_standard and user.expire_standard > now:
+            user.expire_standard = user.expire_standard + timedelta(days=days)
+        else:
+            user.expire_standard = now + timedelta(days=days)
+
+    user.recalculate_expire_date()
     user.tier = tier
     if device_count > 0:
         user.device_count = device_count
@@ -246,7 +255,13 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
         if user.marzban_username:
             mz_user = await marzban_service.get_user(user.marzban_username)
             if mz_user:
-                await marzban_service.update_user_full(user.marzban_username, extra_days=days, tier=tier, device_count=device_count, data_limit_gb=gb_limit)
+                # Собираем активные inbound-ы
+                active_inbounds = []
+                if user.expire_standard and user.expire_standard > now:
+                    active_inbounds.append("vless-reality-standard")
+                if user.expire_premium and user.expire_premium > now:
+                    active_inbounds.append("vless-reality-whitelist")
+                await marzban_service.update_user_full(user.marzban_username, extra_days=days, tier=tier, device_count=device_count, data_limit_gb=gb_limit, inbounds=active_inbounds if active_inbounds else None)
             else:
                 new_user = await marzban_service.create_user(user_telegram_id, user.username, days, data_limit_gb=gb_limit, tier=tier, device_count=device_count)
                 user.marzban_username = new_user.get("username")
@@ -318,7 +333,7 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
             f"💎 Тариф: <b>{tier_name}</b>\n"
             f"⏳ Подписка: <b>{days} дней</b>\n"
             f"📱 Доступно устройств: <b>{user.device_count}</b>\n"
-            f"💰 Сумма: <b>{amount:.2f} {currency}</b>\n\n"
+            f"💰 Сумма: <b>{amount:.2f} ₽</b>\n\n"
         )
         if sub_url:
             msg += (

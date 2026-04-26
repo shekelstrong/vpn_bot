@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import List, Tuple
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from aiogram import Bot
 from loguru import logger
 
@@ -119,7 +120,7 @@ class NotificationScheduler:
             try:
                 now = datetime.utcnow()
                 result = await session.execute(
-                    select(User).where(
+                    select(User).options(selectinload(User.notifications)).where(
                         and_(
                             User.expire_date.isnot(None),
                             User.expire_date > now,
@@ -172,7 +173,7 @@ class NotificationScheduler:
                 now = datetime.utcnow()
                 expired_threshold = now - timedelta(hours=24)
                 result = await session.execute(
-                    select(User).where(
+                    select(User).options(selectinload(User.notifications)).where(
                         and_(
                             User.expire_date.isnot(None),
                             User.expire_date < expired_threshold,

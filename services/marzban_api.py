@@ -209,6 +209,7 @@ class MarzbanService:
             inbound_list = {"vless": ["vless-reality-standard"]}
         
         current_used = user.get("used_traffic", 0) or 0
+        if current_used is None: current_used = 0
         if data_limit_gb > 0:
             new_data_limit = int(current_used + data_limit_gb * 1024 ** 3)
         else:
@@ -313,6 +314,10 @@ class MarzbanService:
 
         current_data_limit = user.get("data_limit") or 0
         current_used = user.get("used_traffic") or 0
+
+        # Защита от None — Marzban может вернуть None
+        if current_data_limit is None: current_data_limit = 0
+        if current_used is None: current_used = 0
 
         if data_limit_gb > 0:
             new_data_limit_bytes = int(current_used + data_limit_gb * 1024 ** 3)
