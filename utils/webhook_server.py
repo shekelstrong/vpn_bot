@@ -76,7 +76,7 @@ class WebhookHandler:
             return web.json_response({"status": "error"}, status=400)
 
     async def api_regenerate_key(self, request: web.Request) -> web.Response:
-        """Перегенерация VPN ключа через мини-апп."""
+        """Перегенерация VPN ключа через мини-апп. Delete + Create (Marzban 0.8.4)."""
         try:
             data = await request.json()
             tg_id = int(data.get("tg_id"))
@@ -89,56 +89,40 @@ class WebhookHandler:
                 if not user.marzban_username:
                     return web.json_response({"error": "Нет активной подписки"}, status=400)
 
-                # Проверяем что аккаунт существует
+                # Получаем текущие данные
                 marzban_data = await marzban_service.get_user(user.marzban_username)
                 if not marzban_data:
-                    # Аккаунт удалён — пересоздаём
-                    now = datetime.utcnow()
-                    days_left = 0
-                    if user.expire_date and user.expire_date > now:
-                        days_left = (user.expire_date - now).days + 1
-                    if days_left <= 0:
-                        return web.json_response({"error": "Подписка истекла"}, status=400)
+                    return web.json_response({"error": "Аккаунт не найден в Marzban"}, status=404)
 
-                    new_acc = await marzban_service.create_user(
-                        tg_id=tg_id, username=user.username,
-                        expire_days=days_left, data_limit_gb=user.gb_limit or 0,
-                        tier=user.tier or "standard", device_count=user.device_count or 1
-                    )
-                    user.marzban_username = new_acc.get('username')
-                    await session.commit()
-                    sub_url = new_acc.get("subscription_url", "")
-                    if sub_url and sub_url.startswith("/"):
-                        sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{sub_url}"
-                    return web.json_response({"status": "ok", "sub_url": sub_url, "message": "Аккаунт пересоздан"})
-
-                # Сохраняем данные до отзыва
-                current_expire = marzban_data.get("expire")
+                current_expire = marzban_data.get("expire") or 0
                 current_data_limit = marzban_data.get("data_limit")
-                current_ip_limit = marzban_data.get("ip_limit", 1)
-                current_inbounds = marzban_data.get("inbounds", {})
+                current_ip_limit = marzban_data.get("ip_limit", 1) or 1
+                current_inbounds = marzban_data.get("inbounds", {}).get("vless", ["vless-reality-standard"])
+                current_used = marzban_data.get("used_traffic", 0) or 0
 
-                # Отзываем
-                try:
-                    await marzban_service.revoke_user_subscription(user.marzban_username)
-                except Exception as revoke_err:
-                    if "404" in str(revoke_err):
-                        return web.json_response({"error": "Аккаунт не найден. Оформите новую подписку."}, status=404)
-                    raise
+                now = datetime.utcnow()
+                current_ts = int(now.timestamp())
+                days_left = (current_expire - current_ts) // 86400 + 1 if current_expire > current_ts else 0
+                if days_left <= 0:
+                    return web.json_response({"error": "Подписка истекла"}, status=400)
 
-                # Восстанавливаем настройки
-                update_data = {"expire": current_expire, "status": "active"}
-                if current_data_limit:
-                    update_data["data_limit"] = current_data_limit
-                if current_ip_limit:
-                    update_data["ip_limit"] = current_ip_limit
-                if current_inbounds:
-                    update_data["inbounds"] = current_inbounds
-                await marzban_service._request("PUT", f"/user/{user.marzban_username}", json=update_data)
+                # Delete + Create
+                await marzban_service.delete_user(user.marzban_username)
 
-                # Новая ссылка
-                new_data = await marzban_service.get_user(user.marzban_username)
-                sub_url = new_data.get("subscription_url", "")
+                new_gb = 0
+                if current_data_limit and current_data_limit > 0:
+                    new_gb = max(0, (current_data_limit - current_used) / (1024**3))
+
+                new_acc = await marzban_service.create_user(
+                    tg_id=tg_id, username=user.username,
+                    expire_days=days_left, data_limit_gb=new_gb,
+                    tier=user.tier or "standard", device_count=current_ip_limit,
+                    inbounds=current_inbounds
+                )
+                user.marzban_username = new_acc.get('username')
+                await session.commit()
+
+                sub_url = new_acc.get("subscription_url", "")
                 if sub_url and sub_url.startswith("/"):
                     sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{sub_url}"
 
