@@ -243,6 +243,11 @@ async def process_gift_activation(message: Message, session: AsyncSession, bot: 
         await message.answer("❌ Срок действия подарочного кода истёк.")
         return
 
+    # Защита от подарка самому себе
+    if gift.creator_id == user_id:
+        await message.answer("❌ Вы не можете активировать свой собственный подарочный код.")
+        return
+
     # Получаем или создаём пользователя
     result = await session.execute(select(User).where(User.user_id == user_id))
     user = result.scalar_one_or_none()

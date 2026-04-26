@@ -421,8 +421,8 @@ class WebhookHandler:
             logger.info(f"💰 Запрос на оплату с баланса: {tg_id}, сумма {amount} руб.")
 
             async with get_session_factory()() as session:
-                # Находим пользователя
-                result = await session.execute(select(User).where(User.user_id == tg_id))
+                # Находим пользователя (с блокировкой от race condition)
+                result = await session.execute(select(User).where(User.user_id == tg_id).with_for_update())
                 user = result.scalar_one_or_none()
                 
                 if not user:
@@ -804,7 +804,7 @@ class WebhookHandler:
             logger.info(f"👥 Оплата с реферального баланса: {tg_id}, {amount}₽, {tier}, {days}дн")
 
             async with get_session_factory()() as session:
-                result = await session.execute(select(User).where(User.user_id == tg_id))
+                result = await session.execute(select(User).where(User.user_id == tg_id).with_for_update())
                 user = result.scalar_one_or_none()
 
                 if not user:
@@ -987,7 +987,7 @@ class WebhookHandler:
             logger.info(f"📦 Докупка трафика из реф баланса: {tg_id}, +{gb}ГБ, {price}₽")
             
             async with get_session_factory()() as session:
-                result = await session.execute(select(User).where(User.user_id == tg_id))
+                result = await session.execute(select(User).where(User.user_id == tg_id).with_for_update())
                 user = result.scalar_one_or_none()
                 if not user:
                     return web.json_response({"error": "Пользователь не найден"}, status=404)
@@ -1079,7 +1079,7 @@ class WebhookHandler:
             logger.info(f"🎁 Подарок из реф баланса: {tg_id}, {amount}₽, {tier}, {days}дн")
             
             async with get_session_factory()() as session:
-                result = await session.execute(select(User).where(User.user_id == tg_id))
+                result = await session.execute(select(User).where(User.user_id == tg_id).with_for_update())
                 user = result.scalar_one_or_none()
                 if not user:
                     return web.json_response({"error": "Пользователь не найден"}, status=404)
