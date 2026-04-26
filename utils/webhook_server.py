@@ -14,6 +14,7 @@ import hmac
 from urllib.parse import parse_qs
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from database.engine import get_session_factory, init_db
 from database.models import User, PaymentInvoice
 from config import settings
@@ -23,6 +24,108 @@ from services.crypto_webhook import handle_crypto_webhook_update
 from services.platega_webhook import handle_platega_webhook_update
 from services.marzban_api import marzban_service
 from services.payment_crypto import crypto_bot_service
+
+
+async def _find_orphan_marzban_account(tg_id: int) -> str | None:
+    """Найти сиротский Marzban-аккаунт для данного tg_id.
+    Ищет по паттернам user_{tg_id}_* и tg_{tg_id}_*."""
+    try:
+        import httpx
+        token = await marzban_service.get_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        base = marzban_service.base_url
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+            resp = await client.get(f"{base}/users", headers=headers, params={"username": f"user_{tg_id}_"})
+            if resp.status_code == 200:
+                data = resp.json()
+                for u in data.get("users", []):
+                    uname = u.get("username", "")
+                    if uname.startswith(f"user_{tg_id}_") or uname.startswith(f"tg_{tg_id}_"):
+                        return uname
+    except Exception as e:
+        logger.warning(f"Marzban lookup сироты {tg_id}: {e}")
+    return None
+
+
+async def _sync_marzban_to_user(user: User) -> None:
+    """Синхронизировать данные из Marzban в локальную модель User.
+    Подтягивает tier, expire, data_limit из активного Marzban-аккаунта."""
+    if not user.marzban_username:
+        return
+    try:
+        mz = await marzban_service.get_user(user.marzban_username)
+        if not mz:
+            return
+
+        now = datetime.utcnow()
+        expire_ts = mz.get("expire") or 0
+        data_limit = mz.get("data_limit") or 0
+        used_traffic = mz.get("used_traffic") or 0
+        inbounds = mz.get("inbounds", {}).get("vless", [])
+
+        # Определяем tier по inbound-ам
+        if "vless-reality-whitelist" in inbounds:
+            user.tier = "premium"
+            if expire_ts > int(now.timestamp()):
+                user.expire_premium = datetime.utcfromtimestamp(expire_ts)
+        else:
+            user.tier = "standard"
+            if expire_ts > int(now.timestamp()):
+                user.expire_standard = datetime.utcfromtimestamp(expire_ts)
+
+        # Общий expire_date
+        if expire_ts > 0:
+            user.expire_date = datetime.utcfromtimestamp(expire_ts) if expire_ts > int(now.timestamp()) else None
+
+        # Трафик
+        if data_limit > 0:
+            user.gb_limit = round(data_limit / (1024**3), 2)
+
+        # ip_limit
+        ip_limit = mz.get("ip_limit") or 1
+        user.device_count = ip_limit
+
+        user.recalculate_expire_date()
+        logger.info(f"🔧 Синхронизированы данные Marzban → User для {user.user_id}: tier={user.tier}, expire={user.expire_date}")
+    except Exception as e:
+        logger.error(f"Ошибка синхронизации Marzban для {user.user_id}: {e}")
+
+
+async def _ensure_user_exists(session, tg_id: int, username: str = None) -> User:
+    """Убедиться что пользователь существует в БД бота.
+    Если нет — создать запись. Если есть Marzban-аккаунт — привязать и синхронизировать."""
+    result = await session.execute(select(User).where(User.user_id == tg_id))
+    user = result.scalar_one_or_none()
+    if user:
+        return user
+
+    import uuid as _uuid
+    marzban_username = f"tg_{tg_id}_{_uuid.uuid4().hex[:6]}"
+
+    # Ищем сиротский аккаунт в Marzban
+    orphan = await _find_orphan_marzban_account(tg_id)
+    if orphan:
+        marzban_username = orphan
+
+    user = User(
+        user_id=tg_id,
+        username=username,
+        marzban_username=marzban_username,
+    )
+
+    # Если нашли сироту — синхронизируем данные
+    if orphan:
+        await _sync_marzban_to_user(user)
+
+    session.add(user)
+    try:
+        await session.commit()
+        logger.info(f"🔧 Авто-создан пользователь {tg_id} (marzban: {marzban_username}, tier: {user.tier})")
+    except IntegrityError:
+        await session.rollback()
+        result = await session.execute(select(User).where(User.user_id == tg_id))
+        user = result.scalar_one_or_none()
+    return user
 
 
 @web.middleware
@@ -207,7 +310,13 @@ class WebhookHandler:
                 user = result.scalar_one_or_none()
                 
                 if not user:
-                    return web.json_response({"error": "user not found"}, status=404)
+                    # Авто-создание юзера, если его нет в БД (зашёл через Mini App минуя /start)
+                    logger.info(f"🔧 Пользователь {tg_id} не найден в БД, авто-создание...")
+                    try:
+                        user = await _ensure_user_exists(session, tg_id, None)
+                    except Exception as e:
+                        logger.error(f"Ошибка авто-создания юзера {tg_id}: {e}")
+                        return web.json_response({"error": "user not found"}, status=404)
                 
                 used_traffic_gb = 0.0
                 sub_url = ""
@@ -367,6 +476,13 @@ class WebhookHandler:
             payment_method = data.get("payment_method", "cryptopay")
             
             logger.info(f"💳 Создание счета для {tg_id} через {payment_method} на {amount} руб. Устройств: {device_count}, Лимит: {gb_limit} ГБ")
+
+            # УБЕДИТЬСЯ ЧТО ЮЗЕР СУЩЕСТВУЕТ В БД (иначе FOREIGN KEY на PaymentInvoice упадёт)
+            async with get_session_factory()() as ensure_session:
+                try:
+                    await _ensure_user_exists(ensure_session, tg_id, None)
+                except Exception as e:
+                    logger.error(f"Ошибка обеспечения юзера {tg_id}: {e}")
 
             pay_url = None
             final_invoice_id = ""

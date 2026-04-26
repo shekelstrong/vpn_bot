@@ -14,7 +14,81 @@ from config import settings
 from database.models import User, PaymentInvoice, Transaction, GiftCode
 from services.marzban_api import marzban_service
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from database.engine import get_session_factory
+
+
+async def _ensure_user_crypto(session, tg_id: int) -> User:
+    """Создать юзера в БД если его нет. Для Crypto webhook.
+    Синхронизирует данные из Marzban если найдёт сиротский аккаунт."""
+    result = await session.execute(select(User).where(User.user_id == tg_id))
+    user = result.scalar_one_or_none()
+    if user:
+        return user
+
+    import uuid as _uuid
+    marzban_username = f"tg_{tg_id}_{_uuid.uuid4().hex[:6]}"
+
+    # Попробовать найти сиротский Marzban-аккаунт
+    try:
+        import httpx
+        token = await marzban_service.get_token()
+        headers = {"Authorization": f"Bearer {token}"}
+        base = marzban_service.base_url
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+            resp = await client.get(f"{base}/users", headers=headers, params={"username": f"user_{tg_id}_"})
+            if resp.status_code == 200:
+                data = resp.json()
+                for u in data.get("users", []):
+                    uname = u.get("username", "")
+                    if uname.startswith(f"user_{tg_id}_") or uname.startswith(f"tg_{tg_id}_"):
+                        marzban_username = uname
+                        break
+    except Exception as e:
+        logger.warning(f"Marzban lookup для сироты {tg_id}: {e}")
+
+    user = User(user_id=tg_id, marzban_username=marzban_username)
+
+    # Синхронизируем данные из Marzban если нашли сироту
+    if marzban_username.startswith(f"user_{tg_id}_") or marzban_username.startswith(f"tg_{tg_id}_"):
+        try:
+            mz = await marzban_service.get_user(marzban_username)
+            if mz:
+                now = datetime.utcnow()
+                expire_ts = mz.get("expire") or 0
+                data_limit = mz.get("data_limit") or 0
+                inbounds = mz.get("inbounds", {}).get("vless", [])
+
+                if "vless-reality-whitelist" in inbounds:
+                    user.tier = "premium"
+                    if expire_ts > int(now.timestamp()):
+                        user.expire_premium = datetime.utcfromtimestamp(expire_ts)
+                else:
+                    user.tier = "standard"
+                    if expire_ts > int(now.timestamp()):
+                        user.expire_standard = datetime.utcfromtimestamp(expire_ts)
+
+                if expire_ts > 0:
+                    user.expire_date = datetime.utcfromtimestamp(expire_ts) if expire_ts > int(now.timestamp()) else None
+
+                if data_limit > 0:
+                    user.gb_limit = round(data_limit / (1024**3), 2)
+
+                user.device_count = mz.get("ip_limit") or 1
+                user.recalculate_expire_date()
+                logger.info(f"🔧 [Crypto] Синхронизированы данные Marzban для {tg_id}: tier={user.tier}")
+        except Exception as e:
+            logger.error(f"Ошибка синхронизации Marzban для {tg_id}: {e}")
+
+    session.add(user)
+    try:
+        await session.commit()
+        logger.info(f"🔧 [Crypto] Авто-создан пользователь {tg_id} (marzban: {marzban_username})")
+    except IntegrityError:
+        await session.rollback()
+        result = await session.execute(select(User).where(User.user_id == tg_id))
+        user = result.scalar_one_or_none()
+    return user
 
 
 async def _process_referrer_bonuses(session, bot, user, amount, action_type="пополнил баланс"):
@@ -147,8 +221,12 @@ async def process_crypto_payment(order_id: str, cryptobot_invoice_id: str, amoun
         result = await session.execute(select(User).where(User.user_id == user_telegram_id))
         user = result.scalar_one_or_none()
         if not user:
-            logger.error(f"User not found: {user_telegram_id}")
-            return False
+            logger.warning(f"⚠️ [Crypto] User {user_telegram_id} не найден в БД, авто-создание...")
+            try:
+                user = await _ensure_user_crypto(session, user_telegram_id)
+            except Exception as e:
+                logger.error(f"Не удалось создать юзера {user_telegram_id}: {e}")
+                return False
 
         # Определяем тип платежа из payload
         payment_type = "subscription"

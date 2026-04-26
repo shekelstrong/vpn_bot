@@ -183,11 +183,18 @@ class NotificationScheduler:
                 )
                 expired_users = result.scalars().all()
                 for user in expired_users:
+                    # Проверяем что ещё не отправляли "expired"
+                    notified_steps = user.last_notified_step.split(",") if user.last_notified_step else []
+                    if "expired" in notified_steps:
+                        continue
                     try:
                         await self.bot.send_message(
                             chat_id=user.user_id,
                             text=NOTIFICATION_MESSAGES.get("expired", ""),
                         )
+                        notified_steps.append("expired")
+                        user.last_notified_step = ",".join(notified_steps)
+                        await session.commit()
                         logger.info(f"Обработан истекший пользователь {user.user_id}")
                     except Exception as e:
                         logger.error(f"Ошибка обработки истекшего {user.user_id}: {e}")
