@@ -9,6 +9,10 @@ from loguru import logger
 from datetime import datetime, timedelta
 from typing import Callable, Awaitable
 
+import hashlib
+import hmac
+from urllib.parse import parse_qs
+
 from sqlalchemy import select
 from database.engine import get_session_factory, init_db
 from database.models import User, PaymentInvoice
@@ -42,7 +46,7 @@ async def cors_middleware(request: web.Request, handler: Callable[[web.Request],
             
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, X-Telegram-InitData'
     
     return response
 
@@ -52,6 +56,45 @@ class WebhookHandler:
 
     def __init__(self, bot):
         self.bot = bot
+
+    def _validate_tg_init_data(self, request: web.Request, expected_tg_id: int = None) -> bool:
+        """Валидация Telegram WebApp initData.
+        Если заголовок есть — проверяем подпись и tg_id.
+        Если заголовка нет — пропускаем (для обратной совместимости).
+        """
+        init_data = request.headers.get('X-Telegram-InitData')
+        if not init_data:
+            # Нет заголовка — старый клиент, пропускаем
+            return True
+
+        try:
+            # Парсим initData
+            parsed = parse_qs(init_data)
+            hash_val = parsed.get('hash', [None])[0]
+            if not hash_val:
+                return False
+
+            # Проверяем HMAC-SHA256
+            secret_key = hmac.new(b'WebAppData', settings.BOT_TOKEN.encode(), hashlib.sha256).digest()
+            check_string = '\n'.join(f'{k}={v[0]}' for k, v in sorted(parsed.items()) if k != 'hash')
+            computed = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+
+            if computed != hash_val:
+                logger.warning(f"Invalid initData signature from {expected_tg_id}")
+                return False
+
+            # Проверяем tg_id если передан
+            if expected_tg_id:
+                user_data = parsed.get('user', [None])[0]
+                if user_data:
+                    user_json = json.loads(user_data)
+                    if user_json.get('id') != expected_tg_id:
+                        logger.warning(f"initData tg_id mismatch: {user_json.get('id')} != {expected_tg_id}")
+                        return False
+            return True
+        except Exception as e:
+            logger.error(f"initData validation error: {e}")
+            return False
 
     # ==========================================
     # РОУТЫ ВЕБХУКОВ
@@ -80,6 +123,8 @@ class WebhookHandler:
         try:
             data = await request.json()
             tg_id = int(data.get("tg_id"))
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
 
             async with get_session_factory()() as session:
                 result = await session.execute(select(User).where(User.user_id == tg_id))
@@ -153,6 +198,8 @@ class WebhookHandler:
                 return web.json_response({"error": "tg_id is required"}, status=400)
                 
             tg_id = int(tg_id_str)
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             logger.info(f"👤 Запрос профиля для ID {tg_id}")
             
             async with get_session_factory()() as session:
@@ -237,6 +284,8 @@ class WebhookHandler:
                 return web.json_response({"error": "tg_id is required"}, status=400)
                 
             tg_id = int(tg_id_raw)
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             channel_id = "@nemo_vpn_official" 
             
             async with get_session_factory()() as session:
@@ -306,6 +355,8 @@ class WebhookHandler:
             # ЗАЩИТА: Если tg_id не передан
             if not tg_id_raw:
                 return web.json_response({"error": "tg_id is required"}, status=400)
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
                 
             tg_id = int(tg_id_raw)
             days = int(data.get("days", 30))
@@ -409,6 +460,8 @@ class WebhookHandler:
             data = await request.json()
             tg_id_raw = data.get("tg_id")
             
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             if not tg_id_raw:
                 return web.json_response({"error": "tg_id is required"}, status=400)
                 
@@ -549,6 +602,8 @@ class WebhookHandler:
         """Создание инвойса для покупки дополнительного трафика."""
         try:
             data = await request.json()
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             tg_id_raw = data.get("tg_id")
 
             if not tg_id_raw:
@@ -652,6 +707,8 @@ class WebhookHandler:
 
     async def api_create_gift(self, request: web.Request) -> web.Response:
         """Создание инвойса для подарочной подписки."""
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
         try:
             data = await request.json()
             tg_id_raw = data.get("tg_id")
@@ -669,14 +726,14 @@ class WebhookHandler:
             months_map = {30: 1, 90: 3, 180: 6, 365: 12}
             months = months_map.get(days, 1)
 
-            # GB лимиты по тарифу
+            # GB лимиты по тарифу (days-based, единая карта)
             GB_LIMITS = {
-                1: 100,   # 1 месяц — 100 ГБ
-                3: 300,   # 3 месяца — 300 ГБ
-                6: 600,   # 6 месяцев — 600 ГБ
-                12: 0,    # 12 месяцев — безлимит
+                30: 100,   # 1 месяц — 100 ГБ
+                90: 350,   # 3 месяца — 350 ГБ
+                180: 800,  # 6 месяцев — 800 ГБ
+                365: 2048, # 12 месяцев — 2 ТБ
             }
-            gb_limit = GB_LIMITS.get(months, 100)
+            gb_limit = GB_LIMITS.get(days, days * 3)
 
             # Цены подарка (можно вынести в настройки)
             GIFT_PRICES = {
@@ -775,6 +832,8 @@ class WebhookHandler:
             logger.error(traceback.format_exc())
             return web.json_response({"error": str(e)}, status=500)
 
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
     async def api_pay_referral(self, request: web.Request) -> web.Response:
         """Оплата подписки из реферального баланса."""
         try:
@@ -981,6 +1040,8 @@ class WebhookHandler:
         try:
             data = await request.json()
             tg_id = int(data.get("tg_id"))
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             gb = int(data.get("gb"))
             price = int(data.get("price"))
             
@@ -1072,6 +1133,8 @@ class WebhookHandler:
         try:
             data = await request.json()
             tg_id = int(data.get("tg_id"))
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             tier = data.get("tier", "premium")
             days = int(data.get("days", 30))
             amount = float(data.get("amount", 300))
