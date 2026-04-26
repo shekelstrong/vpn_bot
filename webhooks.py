@@ -232,7 +232,9 @@ class WebhookHandler:
 
                 # Пересчитываем единый expire_date
                 user.recalculate_expire_date()
-                user.tier = tier
+                # Tier: не понижаем. Если уже premium — остаётся premium
+                if tier == "premium" or user.tier != "premium":
+                    user.tier = tier
                 user.device_count = device_count
 
                 # === БОНУС ЗА ПОДПИСКУ НА КАНАЛ (+3 дня, один раз) ===
