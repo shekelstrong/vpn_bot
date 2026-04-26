@@ -1,6 +1,11 @@
 """
 Обработчик раздела помощи.
-Инструкции по настройке V2Box и FAQ.
+
+ИЗМЕНЕНИЯ:
+1. Все упоминания V2Box заменены на Happ
+2. Кнопка «Как настроить V2Box» → «Как настроить Happ»
+3. Ссылки на скачивание Happ для всех платформ
+4. Убран ключ маршрутизации V2Box, оставлен только Happ
 """
 
 from aiogram import Router, F, types
@@ -9,7 +14,7 @@ from loguru import logger
 
 from keyboards.inline import (
     get_help_keyboard,
-    get_v2box_instruction_keyboard,
+    get_happ_instruction_keyboard,
     get_main_menu_keyboard,
 )
 
@@ -20,7 +25,6 @@ router = Router()
 @router.message(Command("help"))
 @router.message(F.text == "Помощь 🆘")
 async def show_help(callback_or_message: types.CallbackQuery | types.Message):
-    """Показать меню помощи."""
     if isinstance(callback_or_message, types.CallbackQuery):
         callback = callback_or_message
         message = callback.message
@@ -31,7 +35,7 @@ async def show_help(callback_or_message: types.CallbackQuery | types.Message):
     help_text = (
         "🆘 <b>Центр помощи Nemo VPN</b>\n\n"
         "Выберите тему, которая вас интересует:\n\n"
-        "📱 <b>Как настроить V2Box</b>\n"
+        "📱 <b>Как настроить Happ</b>\n"
         "Пошаговая инструкция по настройке приложения\n\n"
         "❓ <b>Частые вопросы</b>\n"
         "Ответы на популярные вопросы\n\n"
@@ -45,36 +49,35 @@ async def show_help(callback_or_message: types.CallbackQuery | types.Message):
     )
 
 
-@router.callback_query(F.data == "help_v2box")
-async def help_v2box(callback: types.CallbackQuery):
-    """Инструкция по настройке V2Box."""
+@router.callback_query(F.data == "help_happ")
+async def help_happ(callback: types.CallbackQuery):
+    """Инструкция по настройке Happ (заменяет V2Box)."""
     instruction_text = (
-        "📱 <b>Настройка V2Box для Nemo VPN</b>\n\n"
+        "📱 <b>Настройка Happ для Nemo VPN</b>\n\n"
         "<b>Шаг 1: Скачайте приложение</b>\n"
-        "• iOS / macOS: App Store\n"
-        "• Android: Google Play Store\n\n"
+        "Нажмите кнопку ниже для вашей платформы.\n\n"
         "<b>Шаг 2: Получите ссылку</b>\n"
         "В разделе «Мой профиль» нажмите «Получить ссылку 🔗» и скопируйте её.\n\n"
         "<b>Шаг 3: Добавьте профиль VPN</b>\n"
-        "1. Откройте приложение V2Box\n"
-        "2. Перейдите в раздел <b>Configs</b> (внизу)\n"
-        "3. Нажмите «+» в правом верхнем углу\n"
-        "4. Выберите <b>Import V2ray URL from Clipboard</b>\n\n"
+        "1. Откройте приложение Happ\n"
+        "2. Нажмите <b>«+»</b> для добавления нового профиля\n"
+        "3. Выберите <b>«Import from Clipboard»</b>\n"
+        "4. Ссылка автоматически добавится\n\n"
         "<b>Шаг 4: Подключитесь</b>\n"
-        "1. Перейдите в раздел <b>Home</b>\n"
-        "2. Проведите вправо ползунок <b>Slide to Connect</b>\n"
+        "1. Выберите добавленный профиль\n"
+        "2. Нажмите кнопку подключения\n"
         "3. Готово! VPN активен 🎉\n\n"
         "🌟 <b>Для пользователей тарифа VIP (Обход списков):</b>\n"
-        "Крупный бизнес и РКН всё чаще детектят устройства с включенным VPN. "
-        "Поэтому мы <b>специально не встраиваем маршрутизацию в основной ключ</b>. "
-        "Для VIP-тарифа мы выдаем второй ключ (и видео-инструкцию), который настраивает ваше окружение вручную: "
-        "российские сервисы и Госуслуги работают напрямую от вашего провайдера, а заблокированные сайты (Instagram, X) — через VPN. "
-        "Это гарантирует, что РКН не увидит подмены, а VPN будет работать даже при тотальных блокировках!"
+        "После покупки VIP-тарифа вам также придёт ключ маршрутизации.\n"
+        "Он настраивает умную маршрутизацию: российские сервисы "
+        "(Сбер, Госуслуги, Wildberries) работают напрямую от вашего провайдера, "
+        "а заблокированные (Instagram, X, ChatGPT) — через VPN.\n\n"
+        "Это делает ваш серфинг невидимым для РКН! 🔒"
     )
     
     await callback.message.answer(
         text=instruction_text,
-        reply_markup=get_v2box_instruction_keyboard(),
+        reply_markup=get_happ_instruction_keyboard(),
     )
     
     await callback.answer()
@@ -82,7 +85,6 @@ async def help_v2box(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "help_faq")
 async def help_faq(callback: types.CallbackQuery):
-    """Частые вопросы."""
     faq_text = (
         "❓ <b>Частые вопросы (FAQ)</b>\n\n"
         
@@ -95,9 +97,13 @@ async def help_faq(callback: types.CallbackQuery):
         "Новая подписка автоматически продлит текущую.\n\n"
         
         "<b>🔹 Чем отличается VIP-тариф?</b>\n"
-        "В VIP-тарифе мы используем умную маршрутизацию (сплит-туннелинг). "
-        "Российские сайты открываются с вашего реального IP, а заблокированные — через VPN. "
-        "Это защищает соединение от РКН и ускоряет работу банков.\n\n"
+        "В VIP-тарифе мы используем умную маршрутизацию.\n"
+        "Российские сайты открываются с вашего реального IP, "
+        "а заблокированные — через VPN.\n\n"
+        
+        "<b>🔹 Можно ли иметь обычный VPN и VIP одновременно?</b>\n"
+        "Да! Купите оба тарифа — по вашей ссылке подписки будут "
+        "доступны два ключа с разными сроками действия.\n\n"
         
         "<b>🔹 Как работает реферальная программа?</b>\n"
         "Приглашайте друзей и получайте проценты с их покупок:\n"
@@ -109,9 +115,13 @@ async def help_faq(callback: types.CallbackQuery):
         "• CryptoBot (USDT, TON, Bitcoin)\n"
         "• Банковские карты РФ (через Platega)\n\n"
         
+        "<b>🔹 Бонус за подписку на канал?</b>\n"
+        "Подпишитесь на @nemo_vpn_official — после первой покупки "
+        "получите +3 дня к подписке бесплатно!\n\n"
+        
         "<b>🔹 Что такое VLESS Reality?</b>\n"
-        "Новейший протокол маскировки трафика. Провайдер видит ваше соединение как "
-        "обычный заход на разрешенный сайт (например, Microsoft), что исключает блокировку.\n\n"
+        "Новейший протокол маскировки трафика. Провайдер видит ваше "
+        "соединение как обычный заход на разрешенный сайт.\n\n"
         
         "<b>🔹 Как связаться с поддержкой?</b>\n"
         "Нажмите «Техподдержка» в меню помощи."
@@ -127,7 +137,6 @@ async def help_faq(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "help_support")
 async def help_support(callback: types.CallbackQuery):
-    """Техподдержка."""
     support_text = (
         "💬 <b>Техподдержка Nemo VPN</b>\n\n"
         "Наша команда готова помочь вам!\n\n"
@@ -141,8 +150,6 @@ async def help_support(callback: types.CallbackQuery):
         "Обычно мы отвечаем в течение 15 минут!"
     )
 
-    # Клавиатура с кнопкой на личку
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     
     builder = InlineKeyboardBuilder()

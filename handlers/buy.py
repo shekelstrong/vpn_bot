@@ -19,6 +19,7 @@ from keyboards.inline import (
     get_traffic_buy_keyboard,
     get_gift_tier_keyboard,
     get_gift_duration_keyboard,
+    get_back_keyboard,
 )
 from services.marzban_api import marzban_service
 from services.payment_crypto import crypto_bot_service
@@ -187,11 +188,12 @@ async def gift_select_duration(callback: types.CallbackQuery, state: FSMContext)
 
 
 # =====================================================================
-# ОСНОВНОЙ ПОТОК ПОКУПКИ ПОДПИСКИ (без изменений)
+# ОСНОВНОЙ ПОТОК ПОКУПКИ ПОДПИСКИ
 # =====================================================================
 
 async def process_manual_payment(bot, session: AsyncSession, payment_invoice: PaymentInvoice):
-    """Ручная обработка выдачи подписки, если вебхук потерялся по пути к серверу."""
+    """Ручная обработка выдачи подписки, если вебхук потерялся.
+    Обновлено: раздельные сроки expire_standard / expire_premium."""
     try:
         days = 30
         tier = "standard"
@@ -220,15 +222,31 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
         )
         session.add(transaction)
 
+        # === РАЗДЕЛЬНЫЕ СРОКИ ===
         now = datetime.utcnow()
-        if user.expire_date and user.expire_date > now:
-            user.expire_date = user.expire_date + timedelta(days=days)
+        if tier == "premium":
+            if user.expire_premium and user.expire_premium > now:
+                user.expire_premium = user.expire_premium + timedelta(days=days)
+            else:
+                user.expire_premium = now + timedelta(days=days)
         else:
-            user.expire_date = now + timedelta(days=days)
+            if user.expire_standard and user.expire_standard > now:
+                user.expire_standard = user.expire_standard + timedelta(days=days)
+            else:
+                user.expire_standard = now + timedelta(days=days)
 
+        user.recalculate_expire_date()
         user.tier = tier
 
+        # Определяем активные inbound-ы
+        active_inbounds = []
+        if user.expire_standard and user.expire_standard > now:
+            active_inbounds.append("vless-reality-standard")
+        if user.expire_premium and user.expire_premium > now:
+            active_inbounds.append("vless-reality-whitelist")
+
         marzban_account_exists = False
+        marzban_data = None
         if user.marzban_username:
             try:
                 marzban_data = await marzban_service.get_user(user.marzban_username)
@@ -237,20 +255,21 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
             except: pass
 
         if marzban_account_exists:
-            # Для VIP — рассчитываем ГБ лимит кумулятивно
             gb_limit = 0
             if tier == "premium":
                 GB_MAP = {3: 3, 30: 100, 90: 350, 180: 800, 365: 2048}
                 new_gb = GB_MAP.get(days, days * 3)
-                # Берём текущий data_limit из Marzban
                 current_limit_gb = user.gb_limit or 0
                 if marzban_data:
                     current_limit_gb = (marzban_data.get("data_limit", 0) or 0) / (1024**3)
-                gb_limit = new_gb  # update_user_expiry сам прибавит к used_traffic
+                gb_limit = new_gb
                 user.gb_limit = current_limit_gb + new_gb
-            await marzban_service.update_user_expiry(user.marzban_username, days, tier=tier, data_limit_gb=gb_limit)
+            # Передаём активные inbound-ы
+            await marzban_service.update_user_expiry(
+                user.marzban_username, days, tier=tier,
+                data_limit_gb=gb_limit, inbounds=active_inbounds
+            )
         else:
-            # Новый пользователь
             gb_new = 0
             if tier == "premium":
                 GB_MAP = {3: 3, 30: 100, 90: 350, 180: 800, 365: 2048}
@@ -261,7 +280,8 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
                 username=user.username,
                 expire_days=days,
                 data_limit_gb=gb_new,
-                tier=tier
+                tier=tier,
+                inbounds=active_inbounds if active_inbounds else None
             )
             user.marzban_username = new_acc.get('username')
 

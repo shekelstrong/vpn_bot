@@ -1,3 +1,13 @@
+"""
+Конфигурация бота Nemo VPN.
+
+ИЗМЕНЕНИЯ:
+1. Добавлен CHANNEL_USERNAME — Telegram канал для бонуса
+2. Добавлены ссылки на скачивание Happ для всех платформ
+3. Добавлены GB_LIMITS для VIP-тарифов по длительности
+4. Убраны упоминания V2Box
+"""
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from typing import List, Optional
@@ -9,6 +19,10 @@ class Settings(BaseSettings):
     # Telegram Bot
     BOT_TOKEN: str = Field(..., description="Токен Telegram бота")
     ADMIN_IDS: str = Field(..., description="Список ID администраторов через запятую")
+
+    # Канал Nemo VPN (для проверки подписки и бонуса)
+    CHANNEL_USERNAME: str = Field(default="@nemo_vpn_official", description="Telegram канал")
+    CHANNEL_CHAT_ID: str = Field(default="-1001234567890", description="Chat ID канала")
 
     # Marzban API
     MARZBAN_URL: str = Field(default="https://vpn.dealflow.bond", description="URL Marzban панели")
@@ -62,10 +76,37 @@ class Settings(BaseSettings):
     # Subscription настройки (VIP тариф - Обход белых списков)
     PREMIUM_PRICE_RUB: int = Field(default=300, description="Цена VIP подписки в рублях")
 
-    # Notification intervals (в минутах до истечения)
+    # Бонус за подписку на канал
+    CHANNEL_BONUS_DAYS: int = Field(default=3, description="Бонус дней за подписку на канал")
+
+    # Notification intervals
     NOTIFICATION_INTERVALS: str = Field(
         default="10080,7200,4320,1440,720,360,180,120,60",
-        description="Интервалы уведомлений в минутах (7д, 5д, 3д, 24ч, 12ч, 6ч, 3ч, 2ч, 1ч)"
+        description="Интервалы уведомлений в минутах"
+    )
+
+    # Ссылки на Happ
+    HAPPL_IOS_URL: str = Field(
+        default="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+        description="Ссылка на Happ в App Store"
+    )
+    HAPPL_ANDROID_URL: str = Field(
+        default="https://play.google.com/store/apps/details?id=com.happproxy",
+        description="Ссылка на Happ в Google Play"
+    )
+    HAPPL_WINDOWS_URL: str = Field(
+        default="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+        description="Ссылка на Happ для Windows"
+    )
+    HAPPL_LINUX_URL: str = Field(
+        default="https://github.com/Happ-proxy/happ-desktop/releases/latest",
+        description="Ссылка на Happ для Linux"
+    )
+
+    # GB лимиты для VIP по длительности подписки
+    VIP_GB_LIMITS: str = Field(
+        default="100,350,800,2048",
+        description="Лимиты GB для VIP: 1мес, 3мес, 6мес, 12мес"
     )
 
     class Config:
@@ -75,50 +116,46 @@ class Settings(BaseSettings):
 
     @property
     def admin_ids_list(self) -> List[int]:
-        """Возвращает список ID администраторов."""
         return [int(x.strip()) for x in self.ADMIN_IDS.split(",")]
 
     @property
     def referral_percentages_list(self) -> List[int]:
-        """Возвращает список процентов реферальной системы."""
         return [int(x.strip()) for x in self.REFERRAL_PERCENTAGES.split(",")]
 
     @property
     def notification_intervals_list(self) -> List[int]:
-        """Возвращает список интервалов уведомлений в минутах."""
         return [int(x.strip()) for x in self.NOTIFICATION_INTERVALS.split(",")]
 
     @property
     def marzban_api_url(self) -> str:
-        """Возвращает полный URL API Marzban."""
         return f"{self.MARZBAN_URL}/api"
 
-async def get_db_setting(session: AsyncSession, key: str, default: str = "") -> str:
-    """Получить настройку из БД."""
-    from database.models import BotSettings
-    from sqlalchemy import select
+    @property
+    def vip_gb_limits_list(self) -> List[int]:
+        return [int(x.strip()) for x in self.VIP_GB_LIMITS.split(",")]
 
+    def get_vip_gb_limit(self, days: int) -> int:
+        """Получить GB лимит для VIP по количеству дней подписки."""
+        gb_map = {30: 100, 90: 350, 180: 800, 365: 2048}
+        return gb_map.get(days, days * 3)
+
+
+async def get_db_setting(session: AsyncSession, key: str, default: str = "") -> str:
+    from database.models import BotSettings
     result = await session.execute(select(BotSettings).filter(BotSettings.key == key))
     setting = result.scalar_one_or_none()
     return setting.value if setting else default
 
 async def get_db_settings_dict(session: AsyncSession) -> dict:
-    """Получить все настройки из БД."""
     from database.models import BotSettings
-    from sqlalchemy import select
-
     result = await session.execute(select(BotSettings))
     settings = result.scalars().all()
     return {s.key: s.value for s in settings}
 
 async def update_db_setting(session: AsyncSession, key: str, value: str, description: Optional[str] = None) -> None:
-    """Обновить или создать настройку в БД."""
     from database.models import BotSettings
-    from sqlalchemy import select
-
     result = await session.execute(select(BotSettings).filter(BotSettings.key == key))
     setting = result.scalar_one_or_none()
-
     if setting:
         setting.value = value
         setting.description = description
@@ -128,10 +165,7 @@ async def update_db_setting(session: AsyncSession, key: str, value: str, descrip
         await session.commit()
 
 async def init_default_settings(session: AsyncSession) -> None:
-    """Инициализация дефолтных настроек в БД."""
     from database.models import BotSettings
-    from sqlalchemy import select
-
     defaults = {
         "subscription_price": ("100", "Цена обычной подписки в рублях"),
         "premium_subscription_price": ("300", "Цена VIP подписки (Обход белых списков) в рублях"),
@@ -142,32 +176,25 @@ async def init_default_settings(session: AsyncSession) -> None:
         "referral_level2": ("10", "Процент рефералов уровня 2"),
         "referral_level3": ("5", "Процент рефералов уровня 3"),
         "referral_min_withdraw": ("1000", "Минимальная сумма вывода в рублях"),
-        # Скидки для разных сроков подписки (в процентах)
         "discount_3month": ("10", "Скидка на 3 месяца (в процентах)"),
         "discount_6month": ("17", "Скидка на 6 месяцев (в процентах)"),
         "discount_12month": ("25", "Скидка на 12 месяцев (в процентах)"),
+        "channel_bonus_days": ("3", "Бонус дней за подписку на канал"),
     }
-
     for key, (value, desc) in defaults.items():
         result = await session.execute(select(BotSettings).where(BotSettings.key == key))
         if not result.scalar_one_or_none():
             session.add(BotSettings(key=key, value=value, description=desc))
-
     await session.commit()
 
 async def calculate_tariff_price(session: AsyncSession, base_price: float, months: int) -> float:
-    """Рассчитать цену с учетом скидки для указанного срока."""
     from database.models import BotSettings
-
     discount_key = f"discount_{months}month" if months >= 3 else None
     if not discount_key:
         return base_price * months
-
     discount_percent = await get_db_setting(session, discount_key, "0")
     discount = float(discount_percent) / 100
     final_price = base_price * months * (1 - discount)
-
     return round(final_price, 2)
 
-# Глобальный экземпляр настроек
 settings = Settings()

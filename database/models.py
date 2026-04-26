@@ -1,5 +1,18 @@
 """
 Модуль моделей базы данных для Nemo VPN Bot.
+
+ИЗМЕНЕНИЯ:
+- Добавлено поле expire_standard (DateTime) — срок стандартной подписки
+- Добавлено поле expire_premium (DateTime) — срок VIP подписки (обход белых списков)
+- Добавлено поле channel_bonus_given (Boolean) — флаг: начислен ли бонус +3 дня за подписку на канал
+- expire_date остаётся для обратной совместимости = max(expire_standard, expire_premium)
+
+MIGRATION: Новые колонки nullable, старые записи не ломаются.
+При первом запуске с новыми полями — SQLAlchemy создаст колонки автоматически (если используется create_all).
+Для существующей БД нужен ALTER TABLE:
+  ALTER TABLE users ADD COLUMN expire_standard DATETIME NULL;
+  ALTER TABLE users ADD COLUMN expire_premium DATETIME NULL;
+  ALTER TABLE users ADD COLUMN channel_bonus_given BOOLEAN DEFAULT 0;
 """
 from datetime import datetime
 from sqlalchemy import (
@@ -26,14 +39,22 @@ class User(Base):
     referral_balance: Mapped[float] = mapped_column(Float, default=0.0)
     referrer_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.user_id"), nullable=True)
     
+    # Единый expire_date = max(expire_standard, expire_premium). Остаётся для обратной совместимости.
     expire_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_notified_step: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     tier: Mapped[str] = mapped_column(String(50), default="standard")
+    
+    # Раздельные сроки подписок по тарифам
+    expire_standard: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expire_premium: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     
     device_count: Mapped[int] = mapped_column(Integer, default=1)
     gb_limit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     task_channel_sub: Mapped[bool] = mapped_column(Boolean, default=False)
     refs_paid_count: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Бонус за подписку на канал (начисляется 1 раз при первой оплате)
+    channel_bonus_given: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -53,6 +74,11 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User(user_id={self.user_id}, platform={self.platform}, username={self.username}, tier={self.tier})>"
+
+    def recalculate_expire_date(self):
+        """Пересчитать единый expire_date как max(expire_standard, expire_premium)."""
+        dates = [d for d in [self.expire_standard, self.expire_premium] if d is not None]
+        self.expire_date = max(dates) if dates else None
 
 class Transaction(Base):
     """Модель транзакции (платежа)."""
@@ -123,7 +149,7 @@ class GiftCode(Base):
     __tablename__ = "gift_codes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    code: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)  # UUID
+    code: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     tier: Mapped[str] = mapped_column(String(50), default="standard")
     days: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -132,7 +158,7 @@ class GiftCode(Base):
     used_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # 30 дней с создания
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     def __repr__(self) -> str:
         return f"<GiftCode(code={self.code}, tier={self.tier}, days={self.days}, is_used={self.is_used})>"
