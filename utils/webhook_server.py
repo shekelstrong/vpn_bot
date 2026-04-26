@@ -981,13 +981,14 @@ class WebhookHandler:
                 # Confirm handled on frontend
                 user.referral_balance -= price
                 
-                # Add GB cumulatively: берём used_traffic из Marzban и прибавляем
+                # Add GB cumulatively: старый лимит + докупка
                 if user.marzban_username:
                     try:
                         mdata = await marzban_service.get_user(user.marzban_username)
                         if mdata:
-                            used_bytes = mdata.get("used_traffic") or 0
-                            new_limit_gb = used_bytes / (1024**3) + gb
+                            old_limit_bytes = mdata.get("data_limit") or 0
+                            old_limit_gb = old_limit_bytes / (1024**3)
+                            new_limit_gb = old_limit_gb + gb
                         else:
                             new_limit_gb = gb
                     except:
