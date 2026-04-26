@@ -355,10 +355,10 @@ class WebhookHandler:
             # ЗАЩИТА: Если tg_id не передан
             if not tg_id_raw:
                 return web.json_response({"error": "tg_id is required"}, status=400)
-            if not self._validate_tg_init_data(request, tg_id):
-                return web.json_response({"error": "Unauthorized"}, status=401)
                 
             tg_id = int(tg_id_raw)
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             days = int(data.get("days", 30))
             tier = data.get("tier", "premium") 
             device_count = int(data.get("device_count", 1))
@@ -602,14 +602,14 @@ class WebhookHandler:
         """Создание инвойса для покупки дополнительного трафика."""
         try:
             data = await request.json()
-            if not self._validate_tg_init_data(request, tg_id):
-                return web.json_response({"error": "Unauthorized"}, status=401)
             tg_id_raw = data.get("tg_id")
 
             if not tg_id_raw:
                 return web.json_response({"error": "tg_id is required"}, status=400)
 
             tg_id = int(tg_id_raw)
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             gb = int(data["gb"])          # 50, 100, 300, 500
             price = int(data["price"])     # 100, 200, 600, 1000
             payment_method = data.get("payment_method", "cryptopay")
@@ -707,14 +707,16 @@ class WebhookHandler:
 
     async def api_create_gift(self, request: web.Request) -> web.Response:
         """Создание инвойса для подарочной подписки."""
-            if not self._validate_tg_init_data(request, tg_id):
-                return web.json_response({"error": "Unauthorized"}, status=401)
         try:
             data = await request.json()
             tg_id_raw = data.get("tg_id")
 
             if not tg_id_raw:
                 return web.json_response({"error": "tg_id is required"}, status=400)
+
+            tg_id = int(tg_id_raw)
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
 
             tg_id = int(tg_id_raw)
             tier = data.get("tier", "premium")
@@ -832,8 +834,6 @@ class WebhookHandler:
             logger.error(traceback.format_exc())
             return web.json_response({"error": str(e)}, status=500)
 
-            if not self._validate_tg_init_data(request, tg_id):
-                return web.json_response({"error": "Unauthorized"}, status=401)
     async def api_pay_referral(self, request: web.Request) -> web.Response:
         """Оплата подписки из реферального баланса."""
         try:
@@ -844,6 +844,8 @@ class WebhookHandler:
                 return web.json_response({"error": "tg_id is required"}, status=400)
 
             tg_id = int(tg_id_raw)
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             days = int(data.get("days", 30))
             tier = data.get("tier", "premium")
 
