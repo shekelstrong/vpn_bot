@@ -210,25 +210,26 @@ class MarzbanService:
         
         current_used = user.get("used_traffic", 0) or 0
         if current_used is None: current_used = 0
-        if data_limit_gb > 0:
-            new_data_limit = int(current_used + data_limit_gb * 1024 ** 3)
-        else:
-            new_data_limit = 0
-            
+
         update_data = {
             "expire": new_expire,
-            "data_limit": new_data_limit,
             "status": "active",
             "proxies": proxies,
             "inbounds": inbound_list
         }
 
-        try:
-            result = await self._request("PUT", f"/user/{marzban_username}", json=update_data)
+        if data_limit_gb > 0:
+            # Добавляем ГБ поверх использованного трафика
+            new_data_limit = int(current_used + data_limit_gb * 1024 ** 3)
+            update_data["data_limit"] = new_data_limit
             try:
                 await self.reset_user_traffic(marzban_username)
             except:
                 pass
+        # Если data_limit_gb == 0 — НЕ трогаем data_limit и НЕ сбрасываем трафик
+
+        try:
+            result = await self._request("PUT", f"/user/{marzban_username}", json=update_data)
             logger.info(f"Продлена подписка {marzban_username} на {extra_days} дней (Тариф: {tier})")
             return result
         except Exception as e:

@@ -298,6 +298,14 @@ class NotificationScheduler:
             await marzban_service._request("PUT", f"/user/{user.marzban_username}", json=update_data)
             logger.info(f"Marzban: обновлены inbound-ы для {user.marzban_username} → {active_inbounds}")
             
+            # Обновляем tier пользователя на основе активных подписок
+            if premium_expired and not standard_expired:
+                user.tier = "standard"
+                logger.info(f"Tier пользователя {user.user_id} изменён на 'standard' (VIP истёк)")
+            elif standard_expired and not premium_expired:
+                user.tier = "premium"
+                logger.info(f"Tier пользователя {user.user_id} изменён на 'premium' (стандарт истёк)")
+
             # Пересчитываем expire_date
             user.recalculate_expire_date()
             await session.commit()
