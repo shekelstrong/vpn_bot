@@ -17,7 +17,6 @@ def get_main_menu_keyboard(show_trial: bool = True) -> InlineKeyboardMarkup:
     builder.button(text="Реферальная программа 👥", callback_data="referral", style="primary")
     builder.button(text="Подписка 📦", callback_data="subscription", style="primary")
     builder.button(text="Купить подписку 🛒", callback_data="buy", style="primary")
-    builder.button(text="📦 Докупить трафик", callback_data="traffic_buy", style="primary")
     builder.button(text="🎁 Подарить VPN", callback_data="gift_start", style="primary")
     builder.button(text="Помощь 🆘", callback_data="help", style="danger")
     if show_trial:
@@ -170,14 +169,14 @@ def get_traffic_payment_keyboard(gb: int, price: int) -> InlineKeyboardMarkup:
 # ТАРИФЫ, ТРАФИК, ПОДАРКИ, АДМИНКА
 # =====================================================================
 
-def get_tier_selection_keyboard(has_subscription: bool = False) -> InlineKeyboardMarkup:
+def get_tier_selection_keyboard(has_subscription: bool = False, tier: str = "standard") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🛡 Обычный VPN", callback_data="tier_standard", style="primary")
     builder.button(text="🚀 Обход белых списков (VIP)", callback_data="tier_premium", style="primary")
-    if has_subscription:
+    if has_subscription and tier == "premium":
         builder.button(text="📦 Докупить трафик", callback_data="traffic_buy", style="primary")
     builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
-    if has_subscription:
+    if has_subscription and tier == "premium":
         builder.adjust(1, 1, 1, 1)
     else:
         builder.adjust(1, 1, 1)

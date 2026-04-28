@@ -38,6 +38,22 @@ async def show_traffic_buy(callback_or_message: types.CallbackQuery | types.Mess
         await message.answer("❌ Пользователь не найден. Нажмите /start")
         return
 
+    # Докупка трафика доступна только для VIP-тарифа
+    if user.tier != "premium":
+        try:
+            await message.edit_text(
+                "ℹ️ <b>Докупка трафика доступна только для VIP-тарифа.</b>\n\n"
+                "У вас обычный VPN с безлимитным трафиком — докупать гигабайты не нужно!",
+                parse_mode="HTML"
+            )
+        except Exception:
+            await message.answer(
+                "ℹ️ <b>Докупка трафика доступна только для VIP-тарифа.</b>\n\n"
+                "У вас обычный VPN с безлимитным трафиком — докупать гигабайты не нужно!",
+                parse_mode="HTML"
+            )
+        return
+
     text = (
         "📶 <b>Докупка трафика</b>\n\n"
         f"Текущий лимит: <b>{user.gb_limit or 0} ГБ</b>\n\n"
@@ -215,6 +231,11 @@ async def traffic_pay_referral(callback: types.CallbackQuery, state: FSMContext,
     user = result.scalar_one_or_none()
     if not user:
         await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    # Докупка трафика доступна только для VIP-тарифа
+    if user.tier != "premium":
+        await callback.answer("Докупка трафика доступна только для VIP-тарифа", show_alert=True)
         return
 
     total_balance = user.balance + user.referral_balance

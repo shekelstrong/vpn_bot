@@ -62,6 +62,24 @@ async def traffic_buy_callback(callback: types.CallbackQuery, session: AsyncSess
                 parse_mode="HTML"
             )
         return
+
+    # Докупка трафика доступна только для VIP-тарифа
+    if user.tier != "premium":
+        try:
+            await callback.message.edit_text(
+                "ℹ️ <b>Докупка трафика доступна только для VIP-тарифа.</b>\n\n"
+                "У вас обычный VPN с безлимитным трафиком — докупать гигабайты не нужно! 🎉",
+                reply_markup=get_back_keyboard("buy"),
+                parse_mode="HTML"
+            )
+        except:
+            await callback.message.answer(
+                "ℹ️ <b>Докупка трафика доступна только для VIP-тарифа.</b>\n\n"
+                "У вас обычный VPN с безлимитным трафиком — докупать гигабайты не нужно! 🎉",
+                reply_markup=get_back_keyboard("buy"),
+                parse_mode="HTML"
+            )
+        return
     
     text = (
         "📦 <b>Докупка трафика</b>\n\n"
@@ -362,8 +380,8 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, sta
         "Идеально обходит ТСПУ и глубокий анализ пакетов (DPI) от Роскомнадзора."
     )
 
-    # Передаём флаг has_subscription чтобы показать кнопку "Докупить трафик"
-    keyboard = get_tier_selection_keyboard(has_subscription=has_subscription)
+    # Кнопка "Докупить трафик" только для VIP с активной подпиской
+    keyboard = get_tier_selection_keyboard(has_subscription=has_subscription, tier=user.tier)
 
     try:
         if message.video or message.animation or message.photo:

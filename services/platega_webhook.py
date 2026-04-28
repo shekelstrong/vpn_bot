@@ -203,6 +203,17 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
 
 async def _process_traffic_payment(session, bot, user, invoice, amount, traffic_gb) -> bool:
     user_id = user.user_id
+
+    # Защита: не устанавливать лимит трафика для стандартного тарифа
+    if user.tier != "premium":
+        logger.warning(f"Попытка докупки трафика для стандартного тарифа: {user_id}. Пропускаем установку лимита.")
+        await bot.send_message(user_id,
+            "ℹ️ <b>У вас обычный VPN с безлимитным трафиком.</b>\n\n"
+            "Докупка гигабайтов вам не нужна — трафик не ограничен!",
+            parse_mode="HTML"
+        )
+        return True
+
     tx = Transaction(
         user_id=user_id, amount=float(amount), currency="RUB",
         payment_method="platega_traffic", status="paid",

@@ -796,6 +796,8 @@ class WebhookHandler:
                     return web.json_response({"error": "Пользователь не найден"}, status=404)
                 if not user.marzban_username:
                     return web.json_response({"error": "У вас нет активной подписки"}, status=400)
+                if user.tier != "premium":
+                    return web.json_response({"error": "Докупка трафика доступна только для VIP-тарифа. У вас безлимитный трафик!"}, status=400)
 
             pay_url = None
             final_invoice_id = ""
@@ -1255,6 +1257,9 @@ class WebhookHandler:
                 user = result.scalar_one_or_none()
                 if not user:
                     return web.json_response({"error": "Пользователь не найден"}, status=404)
+                
+                if user.tier != "premium":
+                    return web.json_response({"error": "Докупка трафика доступна только для VIP-тарифа. У вас безлимитный трафик!"}, status=400)
                 
                 if user.referral_balance < price:
                     return web.json_response({"error": f"Недостаточно средств. Баланс: {user.referral_balance:.0f}₽, нужно: {price}₽"}, status=400)
