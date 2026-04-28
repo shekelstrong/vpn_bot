@@ -576,12 +576,12 @@ class WebhookHandler:
             data = await request.json()
             tg_id_raw = data.get("tg_id")
             
-            if not self._validate_tg_init_data(request, tg_id):
-                return web.json_response({"error": "Unauthorized"}, status=401)
             if not tg_id_raw:
                 return web.json_response({"error": "tg_id is required"}, status=400)
                 
             tg_id = int(tg_id_raw)
+            if not self._validate_tg_init_data(request, tg_id):
+                return web.json_response({"error": "Unauthorized"}, status=401)
             days = int(data.get("days", 30))
             tier = data.get("tier", "premium") 
             device_count = int(data.get("device_count", 1))
@@ -902,14 +902,17 @@ class WebhookHandler:
             months_map = {30: 1, 90: 3, 180: 6, 365: 12}
             months = months_map.get(days, 1)
 
-            # GB лимиты по тарифу (days-based, единая карта)
-            GB_LIMITS = {
-                30: 100,   # 1 месяц — 100 ГБ
-                90: 350,   # 3 месяца — 350 ГБ
-                180: 800,  # 6 месяцев — 800 ГБ
-                365: 2048, # 12 месяцев — 2 ТБ
-            }
-            gb_limit = GB_LIMITS.get(days, days * 3)
+            # GB лимиты только для VIP (стандарт = безлимит)
+            if tier == "standard":
+                gb_limit = 0
+            else:
+                GB_LIMITS = {
+                    30: 100,   # 1 месяц — 100 ГБ
+                    90: 350,   # 3 месяца — 350 ГБ
+                    180: 800,  # 6 месяцев — 800 ГБ
+                    365: 2048, # 12 месяцев — 2 ТБ
+                }
+                gb_limit = GB_LIMITS.get(days, days * 3)
 
             # Цены подарка (можно вынести в настройки)
             GIFT_PRICES = {

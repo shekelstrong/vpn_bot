@@ -415,11 +415,20 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
 
     now = datetime.utcnow()
     is_extension = bool(user.expire_date and user.expire_date > now)
-    if is_extension:
-        user.expire_date = user.expire_date + timedelta(days=days)
-    else:
-        user.expire_date = now + timedelta(days=days)
 
+    # Раздельные сроки по тарифам
+    if tier == "premium":
+        if user.expire_premium and user.expire_premium > now:
+            user.expire_premium = user.expire_premium + timedelta(days=days)
+        else:
+            user.expire_premium = now + timedelta(days=days)
+    else:
+        if user.expire_standard and user.expire_standard > now:
+            user.expire_standard = user.expire_standard + timedelta(days=days)
+        else:
+            user.expire_standard = now + timedelta(days=days)
+
+    user.recalculate_expire_date()
     user.tier = tier
     if device_count > 0:
         user.device_count = device_count
