@@ -286,6 +286,7 @@ async def _process_traffic_payment(session, bot, user, invoice, amount, traffic_
     # Защита: не устанавливать лимит трафика для стандартного тарифа
     if user.tier != "premium":
         logger.warning(f"Попытка докупки трафика для стандартного тарифа: {user_id}. Пропускаем установку лимита.")
+        await session.commit()
         await bot.send_message(user_id,
             "ℹ️ <b>У вас обычный VPN с безлимитным трафиком.</b>\n\n"
             "Докупка гигабайтов вам не нужна — трафик не ограничен!",
