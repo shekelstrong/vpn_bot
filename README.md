@@ -41,7 +41,7 @@ BOT_TOKEN=ваш_токен_от_BotFather
 ADMIN_IDS=ваш_TG_ID
 
 # Marzban API
-MARZBAN_URL=https://vpn.dealflow.bond
+MARZBAN_URL=https://your-marzban-url.com
 MARZBAN_ADMIN_USERNAME=ваш_логин
 MARZBAN_ADMIN_PASSWORD=ваш_пароль
 
@@ -199,8 +199,8 @@ vpn_bot/
 ### Параметры по умолчанию
 ```env
 VLESS_PORT=8444
-VLESS_SNI=dl.google.com
-VLESS_PUBLIC_KEY=WWBO76lAFkXyj17WK7shhvGMvMl2NrRpLLfvTnH7TkA
+VLESS_SNI=your-sni.com
+VLESS_PUBLIC_KEY=your-public-key
 VLESS_SHORT_ID=fb8e00
 VLESS_FINGERPRINT=chrome
 ```

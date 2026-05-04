@@ -3,7 +3,7 @@
 ## 📋 Предварительные требования
 
 1. **Docker** и **Docker Compose** установлены на сервере
-2. **Marzban** панель уже работает по адресу `https://vpn.dealflow.bond`
+2. **Marzban** панель уже работает по адресу `https://your-marzban-url.com`
 3. Токен бота получен от [@BotFather](https://t.me/BotFather)
 4. Аккаунты в платежных системах (CryptoBot, Platega)
 
@@ -29,11 +29,11 @@ nano .env
 
 ```env
 # Telegram Bot
-BOT_TOKEN=8699535910:AAEJWQKEiArPCyppEilTJUjj7B1ov9SIdr4
+BOT_TOKEN=ваш_токен_от_BotFather
 ADMIN_IDS=ваш_TG_ID
 
 # Marzban API
-MARZBAN_URL=https://vpn.dealflow.bond
+MARZBAN_URL=https://your-marzban-url.com
 MARZBAN_ADMIN_USERNAME=ваш_логин_в_marzban
 MARZBAN_ADMIN_PASSWORD=ваш_пароль_в_marzban
 
@@ -247,7 +247,7 @@ docker-compose logs -f db | grep "database system is ready"
 1. Проверьте логин/пароль в `.env`
 2. Убедитесь, что Marzban доступен:
 ```bash
-curl https://vpn.dealflow.bond/api
+curl https://your-marzban-url.com/api
 ```
 
 ### Платежи не работают

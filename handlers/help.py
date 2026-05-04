@@ -17,6 +17,7 @@ from keyboards.inline import (
     get_happ_instruction_keyboard,
     get_main_menu_keyboard,
 )
+from config import settings
 
 router = Router()
 
@@ -116,7 +117,7 @@ async def help_faq(callback: types.CallbackQuery):
         "• Банковские карты РФ (через Platega)\n\n"
         
         "<b>🔹 Бонус за подписку на канал?</b>\n"
-        "Подпишитесь на @nemo_vpn_official — после первой покупки "
+        f"Подпишитесь на {settings.CHANNEL_USERNAME} — после первой покупки "
         "получите +3 дня к подписке бесплатно!\n\n"
         
         "<b>🔹 Что такое VLESS Reality?</b>\n"

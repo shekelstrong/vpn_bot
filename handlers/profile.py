@@ -90,7 +90,7 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, s
             "примените ключ маршрутизации в приложении Happ:\n\n"
             "🔑 <b>Ключ маршрутизации Happ:</b>\n"
             f"<code>{ROUTE_HAPP}</code>\n"
-            "📽 <a href='https://t.me/nemo_vpn_official/56'><b>Видео-инструкция</b></a>\n\n"
+            f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>\n\n"
             "На уровне нашего сервера для вас включен жесткий БЛОК на посещение RU-сервисов через VPN, "
             "поэтому они будут работать только напрямую — это делает ваш серфинг невидимым для проверок!"
         )
@@ -337,7 +337,7 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
                 link_text += (
                     "💎 <b>VIP: Ключ маршрутизации:</b>\n"
                     f"<code>{ROUTE_HAPP}</code>\n\n"
-                    "📽 <a href='https://t.me/nemo_vpn_official/56'><b>Видео-инструкция</b></a>"
+                    f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>"
                 )
             else:
                 link_text += "⚠️ Не передавайте ссылку третьим лицам!"

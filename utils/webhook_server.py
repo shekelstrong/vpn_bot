@@ -395,7 +395,7 @@ class WebhookHandler:
             tg_id = int(tg_id_raw)
             if not self._validate_tg_init_data(request, tg_id):
                 return web.json_response({"error": "Unauthorized"}, status=401)
-            channel_id = "@nemo_vpn_official" 
+            channel_id = settings.CHANNEL_USERNAME 
             
             async with get_session_factory()() as session:
                 result = await session.execute(select(User).where(User.user_id == tg_id))

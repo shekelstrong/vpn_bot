@@ -105,7 +105,7 @@ BOT_TOKEN=your_bot_token
 ADMIN_IDS=123456789,987654321
 
 # Marzban API
-MARZBAN_URL=https://vpn.dealflow.bond
+MARZBAN_URL=https://your-marzban-url.com
 MARZBAN_ADMIN_USERNAME=admin
 MARZBAN_ADMIN_PASSWORD=password
 
