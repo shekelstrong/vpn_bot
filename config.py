@@ -21,11 +21,11 @@ class Settings(BaseSettings):
     ADMIN_IDS: str = Field(..., description="Список ID администраторов через запятую")
 
     # Канал Nemo VPN (для проверки подписки и бонуса)
-    CHANNEL_USERNAME: str = Field(default="@nemo_vpn_official", description="Telegram канал")
-    CHANNEL_CHAT_ID: str = Field(default="-1001234567890", description="Chat ID канала")
+    CHANNEL_USERNAME: str = Field(default="@your_channel", description="Telegram канал")
+    CHANNEL_CHAT_ID: str = Field(default="-1000000000000", description="Chat ID канала")
 
     # Marzban API
-    MARZBAN_URL: str = Field(default="https://vpn.dealflow.bond", description="URL Marzban панели")
+    MARZBAN_URL: str = Field(default="https://your-marzban-url.com", description="URL Marzban панели")
     MARZBAN_ADMIN_USERNAME: str = Field(..., description="Логин администратора Marzban")
     MARZBAN_ADMIN_PASSWORD: str = Field(..., description="Пароль администратора Marzban")
 
@@ -57,9 +57,9 @@ class Settings(BaseSettings):
 
     # VLESS Reality настройки (Стандарт)
     VLESS_PORT: int = Field(default=8444, description="Порт VLESS Reality")
-    VLESS_SNI: str = Field(default="dl.google.com", description="SNI для VLESS Reality")
+    VLESS_SNI: str = Field(default="your-sni.com", description="SNI для VLESS Reality")
     VLESS_PUBLIC_KEY: str = Field(
-        default="WWBO76lAFkXyj17WK7shhvGMvMl2NrRpLLfvTnH7TkA",
+        default="your-public-key",
         description="Публичный ключ VLESS Reality"
     )
     VLESS_SHORT_ID: str = Field(default="fb8e00", description="Short ID для VLESS Reality")

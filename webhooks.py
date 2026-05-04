@@ -33,7 +33,7 @@ from handlers.admin.notifications import (
 )
 
 # Канал Nemo VPN
-CHANNEL_USERNAME = "@nemo_vpn_official"
+CHANNEL_USERNAME = settings.CHANNEL_USERNAME
 
 logger.remove()
 logger.add(
@@ -397,7 +397,7 @@ class WebhookHandler:
                                 "а заблокированных через VPN — примените ключ маршрутизации:\n\n"
                                 "🔑 <b>Для Happ (все платформы):</b>\n"
                                 "<code>happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0=</code>\n\n"
-                                "📽 <a href='https://t.me/nemo_vpn_official/56'><b>Видео-инструкция</b></a>\n\n"
+                                f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>\n\n"
                                 "Российские сервисы будут работать напрямую, а заблокированные — через VPN. "
                                 "Это делает ваш серфинг невидимым для проверок РКН! 🔒\n"
                             )
@@ -445,8 +445,8 @@ async def run_webhooks():
     logger.info("=" * 50)
     logger.info("Вебхук-сервер Nemo VPN запущен (Порт 8080)!")
     logger.info("Webhooks:")
-    logger.info("  - https://dealflow.bond/cryptopay (CryptoBot)")
-    logger.info("  - https://dealflow.bond/webhook/platega (Platega)")
+    logger.info(f"  - https://{settings.BASE_URL}/cryptopay (CryptoBot)")
+    logger.info(f"  - https://{settings.BASE_URL}/webhook/platega (Platega)")
     logger.info("=" * 50)
 
     try:

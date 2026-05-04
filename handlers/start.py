@@ -19,11 +19,12 @@ from datetime import datetime, timedelta
 from database.models import User, PaymentInvoice, GiftCode
 from keyboards.inline import get_main_menu_keyboard
 from handlers.admin.notifications import notify_admin_new_user, notify_referrer_new_referral
+from config import settings
 
 router = Router(name="start_router")
 
-CHANNEL_USERNAME = "@nemo_vpn_official"
-CHANNEL_LINK = "https://t.me/nemo_vpn_official"
+CHANNEL_USERNAME = settings.CHANNEL_USERNAME
+CHANNEL_LINK = f"https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}"
 
 # Проверка подписки каждый час (для не-подписчиков)
 CHECK_INTERVAL = timedelta(hours=1)

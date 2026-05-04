@@ -616,7 +616,7 @@ async def cmd_webhook_set(message: types.Message):
     """Установить вебхук CryptoBot."""
     from services.payment_crypto import crypto_bot_service
     
-    webhook_url = "https://dealflow.bond/cryptopay"
+    webhook_url = f"https://{settings.BASE_URL}/cryptopay"
     
     await message.answer(f"⏳ Установка вебхука на URL: {webhook_url}...")
     
