@@ -209,6 +209,11 @@ async def process_user_search(message: types.Message, state: FSMContext, session
             result = await session.execute(
                 select(User).where(User.user_id == user_id)
             )
+        elif search_type == "vk_id":
+            vk_id = int(search_value)
+            result = await session.execute(
+                select(User).where(User.vk_id == vk_id)
+            )
         else:
             username = search_value.lstrip("@")
             result = await session.execute(
@@ -229,7 +234,10 @@ async def process_user_search(message: types.Message, state: FSMContext, session
             f"👤 <b>Информация о пользователе</b>\n\n"
             f"<b>ID:</b> <code>{user.user_id}</code>\n"
             f"<b>Username:</b> @{user.username if user.username else 'N/A'}\n"
-            f"<b>Marzban:</b> <code>{user.marzban_username or 'N/A'}</code>\n\n"
+            f"<b>Marzban (TG):</b> <code>{user.marzban_username or 'N/A'}</code>\n"
+            f"<b>Marzban (VK):</b> <code>{user.marzban_username_vk or 'N/A'}</code>\n"
+            f"<b>VK ID:</b> <code>{user.vk_id or 'N/A'}</code>\n"
+            f"<b>Platform:</b> {user.platform or 'tg'}\n\n"
             f"<b>Баланс:</b> {user.balance:.2f}₽\n"
             f"<b>Реф. баланс:</b> {user.referral_balance:.2f}₽\n"
             f"<b>Триал:</b> {'Использован' if user.is_trial_used else 'Не использован'}\n\n"

@@ -182,6 +182,14 @@ async def show_profile(callback_or_message: types.CallbackQuery | types.Message,
     if referrals:
         profile_text += f"\n👥 <b>Рефералы:</b> {len(referrals)}\n"
 
+    # VK привязка
+    if user.vk_id:
+        profile_text += f"\n🔗 <b>VK привязан:</b> <code>{user.vk_id}</code>\n"
+        if user.marzban_username_vk:
+            profile_text += f"📱 <b>VK конфиг:</b> <code>{user.marzban_username_vk}</code>\n"
+    elif hasattr(user, "marzban_username_vk") and user.marzban_username_vk:
+        profile_text += f"\n📱 <b>VK конфиг:</b> <code>{user.marzban_username_vk}</code>\n"
+
     has_subscription = user.expire_date and user.expire_date > datetime.utcnow()
     show_link = has_subscription and user.marzban_username and (marzban_data is not None)
 

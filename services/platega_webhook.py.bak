@@ -138,8 +138,8 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             logger.error(f"Cannot parse user_id: {order_id}")
             return False
     elif is_vk or is_vk_gift:
-        # VK заказ — создаём инвойс в БД, VK-бот polling всё обработает
-        # (подписка, Marzban, уведомление в VK)
+        # VK заказ — просто создаём инвойс в БД, VK-бот polling обработает активацию
+        # Формат: vk_tier_vkUserId_days_uuid  или  vkgift_tier_vkUserId_days_uuid
         prefix = "vkgift_" if is_vk_gift else "vk_"
         rest = order_id[len(prefix):]
         vk_parts = rest.split("_")
@@ -154,29 +154,24 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             logger.error(f"Cannot parse VK order_id fields: {order_id}")
             return False
 
-        logger.info(f"VK Platega: VK order tier={vk_tier} vk_user_id={vk_user_id} days={vk_days} amount={amount}")
+        logger.info(f"ℹ️ [VK Platega] VK order received: tier={vk_tier}, vk_user_id={vk_user_id}, days={vk_days}, amount={amount}")
 
+        # Ищем юзера по vk_id
         try:
             async with get_session_factory()() as session:
-                # Находим юзера по vk_id
                 result = await session.execute(select(User).where(User.vk_id == vk_user_id))
                 vk_user = result.scalar_one_or_none()
                 if not vk_user:
-                    logger.error(f"VK Platega: User vk_id={vk_user_id} not found")
+                    logger.error(f"❌ [VK Platega] User with vk_id={vk_user_id} not found in DB")
                     return False
 
-                # Проверяем что инвойс не создан ранее
+                # Проверяем что инвойс ещё не обработан
                 existing = await session.execute(select(PaymentInvoice).where(PaymentInvoice.invoice_id == str(order_id)))
                 if existing.scalar_one_or_none():
-                    logger.info(f"VK Platega: Invoice {order_id} already exists")
+                    logger.info(f"ℹ️ [VK Platega] Invoice {order_id} already exists, skipping")
                     return True
 
-                # Создаём инвойс со status=paid — VK-бот polling обработает активацию
-                # Если у VK-юзера есть marzban_username, сохраняем его как marzban_username_vk
-                vk_marzban = vk_user.marzban_username
-                if vk_marzban and not vk_user.marzban_username_vk:
-                    vk_user.marzban_username_vk = vk_marzban
-                
+                # Создаём инвойс — VK-бот polling обработает активацию
                 invoice = PaymentInvoice(
                     user_id=vk_user.user_id,
                     invoice_id=str(order_id),
@@ -184,21 +179,31 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                     currency="RUB",
                     payment_method="platega",
                     status="paid",
-                    payload=json.dumps({
-                        "days": vk_days,
-                        "tier": vk_tier,
-                        "type": "gift" if is_vk_gift else "subscription",
-                        "vk_user_id": vk_user_id,
-                        "marzban_username_vk": vk_marzban or "",
-                    }),
+                    payload=json.dumps({"days": vk_days, "tier": vk_tier, "type": "gift" if is_vk_gift else "subscription", "vk_user_id": vk_user_id}),
                     created_at=datetime.utcnow(),
                 )
                 session.add(invoice)
                 await session.commit()
-                logger.info(f"VK Platega: Invoice created for vk_id={vk_user_id}, VK polling will activate")
+
+                logger.info(f"✅ [VK Platega] Invoice created for vk_id={vk_user_id}, VK-бот polling обработает активацию")
         except Exception as e:
-            logger.error(f"VK Platega: Error creating invoice: {e}")
+            logger.error(f"❌ [VK Platega] Error creating invoice: {e}")
             return False
+
+        # Уведомляем админов
+        for admin_id in settings.admin_ids_list:
+                    "<b>VK пополнение (Platega)</b>\n"
+                await bot.send_message(admin_id,
+                    f"💰 <b>VK пополнение (Platega)</b>
+"
+                    f"VK ID: <code>{vk_user_id}</code>
+"
+                    f"Тариф: {vk_tier}, {vk_days}д
+"
+                    f"Сумма: {amount:.0f}₽",
+                    parse_mode="HTML")
+            except:
+                pass
 
         return True
     else:

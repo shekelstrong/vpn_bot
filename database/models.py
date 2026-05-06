@@ -33,6 +33,7 @@ class User(Base):
     platform: Mapped[str] = mapped_column(String(10), default="tg")
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     marzban_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
+    marzban_username_vk: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     is_trial_used: Mapped[bool] = mapped_column(Boolean, default=False)
     balance: Mapped[float] = mapped_column(Float, default=0.0)

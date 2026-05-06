@@ -28,6 +28,8 @@ services:
       - nemo_net
 
   nemo_vpn_db:
+    ports:
+      - "5432:5432"
     image: postgres:15-alpine
     container_name: nemo_vpn_db
     restart: always
