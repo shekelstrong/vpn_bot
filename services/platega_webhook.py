@@ -195,24 +195,8 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 await session.commit()
                 await session.refresh(gift_code)
 
-                # Уведомляем дарителя через VK-бот
-                try:
-                    import httpx
-                    tier_name = "👑 Обход белых списков" if vk_tier == "premium" else "⚡ Обычный"
-                    msg = (
-                        f"✅ Оплата подарочной подписки подтверждена!\n\n"
-                        f"Тариф: {tier_name}\n"
-                        f"Длительность: {vk_days} дней\n\n"
-                        f"🎁 Ваш подарочный код: {gift_code.code}\n\n"
-                        f"Отправьте этот код другу!"
-                    )
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        await client.post(
-                            "http://127.0.0.1:8082/webhook/vk_notify",
-                            json={"vk_id": vk_user_id, "message": msg}
-                        )
-                except Exception as e:
-                    logger.warning(f"⚠️ [VK Platega] Cannot notify VK user: {e}")
+                # Уведомление отправит VK-бот polling
+                logger.info(f"✅ [VK Platega] Gift code {gift_code.code} created, VK-бот polling отправит уведомление дарителю")
 
                 for admin_id in settings.admin_ids_list:
                     try:
@@ -228,13 +212,55 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
                 logger.info(f"✅ [VK Platega] Gift code {gift_code.code} created for vk_id={vk_user_id}")
                 return True
 
-            # Обычная VK подписка — активируем через Marzban
-            from services.subscription import activate_subscription
-            success = await activate_subscription(vk_user, vk_tier, vk_days, "subscription")
+            # Обычная VK подписка — активируем через Marzban + обновляем БД
+            now = datetime.utcnow()
+            if vk_tier == "premium":
+                if vk_user.expire_premium and vk_user.expire_premium > now:
+                    vk_user.expire_premium = vk_user.expire_premium + timedelta(days=vk_days)
+                else:
+                    vk_user.expire_premium = now + timedelta(days=vk_days)
+            else:
+                if vk_user.expire_standard and vk_user.expire_standard > now:
+                    vk_user.expire_standard = vk_user.expire_standard + timedelta(days=vk_days)
+                else:
+                    vk_user.expire_standard = now + timedelta(days=vk_days)
 
-            if not success:
-                logger.error(f"❌ [VK Platega] Failed to activate subscription for vk_id={vk_user_id}")
-                return False
+            # Обновляем общий expire_date
+            expires = []
+            if vk_user.expire_standard and vk_user.expire_standard > now:
+                expires.append(vk_user.expire_standard)
+            if vk_user.expire_premium and vk_user.expire_premium > now:
+                expires.append(vk_user.expire_premium)
+            vk_user.expire_date = max(expires) if expires else now + timedelta(days=vk_days)
+            vk_user.tier = vk_tier
+
+            # Активируем/обновляем Marzban
+            if vk_user.marzban_username:
+                try:
+                    mz_user = await marzban_service.get_user(vk_user.marzban_username)
+                    if mz_user:
+                        active_inbounds = []
+                        if vk_user.expire_standard and vk_user.expire_standard > now:
+                            active_inbounds.append("vless-reality-standard")
+                        if vk_user.expire_premium and vk_user.expire_premium > now:
+                            active_inbounds.append("vless-reality-whitelist")
+                        await marzban_service.update_user_full(
+                            vk_user.marzban_username,
+                            extra_days=vk_days,
+                            tier=vk_tier,
+                            inbounds=active_inbounds if active_inbounds else None,
+                        )
+                except Exception as e:
+                    logger.error(f"❌ [VK Platega] Marzban update error: {e}")
+            else:
+                try:
+                    new_mz = await marzban_service.create_user(
+                        vk_user.user_id, vk_user.username or "", vk_days, tier=vk_tier
+                    )
+                    if new_mz:
+                        vk_user.marzban_username = new_mz.get("username")
+                except Exception as e:
+                    logger.error(f"❌ [VK Platega] Marzban create error: {e}")
 
             invoice = PaymentInvoice(
                 user_id=vk_user.user_id, invoice_id=str(order_id),
@@ -253,23 +279,8 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             session.add(tx)
             await session.commit()
 
-            # Уведомляем юзера через VK-бот webhook
-            try:
-                import httpx
-                tier_name = "👑 Обход белых списков" if vk_tier == "premium" else "⚡ Обычный"
-                msg = (
-                    f"✅ Оплата подтверждена!\n\n"
-                    f"Тариф: {tier_name}\n"
-                    f"Длительность: {vk_days} дней\n\n"
-                    f"Нажмите «👤 Профиль» чтобы получить VPN ключ."
-                )
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    await client.post(
-                        "http://127.0.0.1:8082/webhook/vk_notify",
-                        json={"vk_id": vk_user_id, "message": msg}
-                    )
-            except Exception as e:
-                logger.warning(f"⚠️ [VK Platega] Cannot notify VK user: {e}")
+            # Уведомление отправит VK-бот polling, когда найдёт инвойс со status="paid"
+            logger.info(f"✅ [VK Platega] Subscription activated in DB+Marzban for vk_id={vk_user_id}, VK-бот polling отправит уведомление")
 
             for admin_id in settings.admin_ids_list:
                 try:
