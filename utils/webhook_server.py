@@ -334,6 +334,30 @@ class WebhookHandler:
                     except Exception as e: 
                         logger.error(f"Ошибка получения данных из Marzban для {user.marzban_username}: {e}")
 
+                # VK Marzban data
+                vk_used_traffic_gb = 0.0
+                vk_sub_url = ""
+                vk_vless_link = ""
+                vk_gb_limit = 0
+                
+                if user.marzban_username_vk:
+                    try:
+                        vk_mz_data = await marzban_service.get_user(user.marzban_username_vk)
+                        if vk_mz_data:
+                            vk_used_traffic_gb = round(vk_mz_data.get('used_traffic', 0) / (1024**3), 2)
+                            # Status from VK Marzban: data_limit > 0 means traffic is limited
+                            data_limit = vk_mz_data.get('data_limit', 0)
+                            if data_limit and data_limit > 0:
+                                vk_gb_limit = round(data_limit / (1024**3), 0)
+                    except Exception as e:
+                        logger.error(f"Ошибка получения VK Marzban данных для {user.marzban_username_vk}: {e}")
+                    try:
+                        vk_sub_url = await marzban_service.get_user_subscription(user.marzban_username_vk)
+                        if vk_sub_url:
+                            vk_vless_link = await marzban_service.get_user_vless_link(user.marzban_username_vk)
+                    except Exception as e:
+                        logger.error(f"Ошибка получения VK подписки для {user.marzban_username_vk}: {e}")
+
                 days_left = 0
                 if user.expire_date and user.expire_date > datetime.utcnow():
                     delta = user.expire_date - datetime.utcnow()
@@ -377,8 +401,11 @@ class WebhookHandler:
                         "sub_url": sub_url,
                         "vless_link": vless_link,
                         "vk_id": user.vk_id,
-                        "vk_sub_url": await marzban_service.get_user_subscription(user.marzban_username_vk) if user.marzban_username_vk else "",
-                        "marzban_username_vk": user.marzban_username_vk
+                        "vk_sub_url": vk_sub_url,
+                        "vk_vless_link": vk_vless_link,
+                        "vk_marzban_username": user.marzban_username_vk or "",
+                        "vk_used_traffic": vk_used_traffic_gb,
+                        "vk_gb_limit": vk_gb_limit
                     }
                 })
         except Exception as e:
