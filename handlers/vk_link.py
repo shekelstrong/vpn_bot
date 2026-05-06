@@ -1,11 +1,11 @@
 import re
 from aiogram import Router, F
 from aiogram.types import Message
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 from datetime import datetime, timedelta
-from database.models import User
+from database.models import User, PaymentInvoice, Transaction, Notification, GiftCode
 
 link_router = Router(name="vk_link_router")
 
@@ -17,11 +17,9 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
     VK бот сохраняет last_notified_step = 'tg_link:CODE:unix_timestamp'
     TG пользователь отправляет CODE → аккаунты связываются.
     
-    Если VK-юзер уже существует в БД — сливаем его данные в TG-юзера
-    и удаляем VK-юзера (unique constraint на vk_id).
-    
-    ВАЖНО: сначала удаляем VK-юзера (чтобы освободить vk_id),
-    затем привязываем vk_id к TG-юзеру. Иначе UniqueViolationError.
+    Если VK-юзер уже существует в БД — сливаем его данные в TG-юзера,
+    переносим все связанные записи (инвойсы, транзакции, уведомления, подарочные коды),
+    и удаляем VK-юзера.
     """
     code = message.text.strip()
     user_id = message.from_user.id
@@ -65,10 +63,9 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
         )
         return
     
-    # === Сливаем аккаунты ===
-    
     # Сохраняем данные VK-юзера перед удалением
     vk_id = vk_user.vk_id
+    vk_user_id = vk_user.user_id
     vk_marzban = vk_user.marzban_username
     vk_is_trial = vk_user.is_trial_used
     vk_balance = vk_user.balance or 0
@@ -84,11 +81,7 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
     vk_refs_paid = vk_user.refs_paid_count or 0
     vk_task_channel_sub = vk_user.task_channel_sub
     
-    # СНАЧАЛА удаляем VK-юзера (освобождаем vk_id unique constraint)
-    await session.delete(vk_user)
-    await session.flush()  # Гарантируем что DELETE выполнится до UPDATE
-    
-    # Теперь получаем TG пользователя
+    # Получаем или создаём TG пользователя
     tg_result = await session.execute(select(User).where(User.user_id == user_id))
     tg_user = tg_result.scalar_one_or_none()
     
@@ -115,8 +108,66 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
             task_channel_sub=vk_task_channel_sub,
         )
         session.add(tg_user)
+        await session.flush()  # Проверим что TG юзер создан перед переносом записей
+        
+        # Переносим все связанные записи с VK-юзера на TG-юзера
+        await session.execute(
+            update(PaymentInvoice).where(PaymentInvoice.user_id == vk_user_id)
+            .values(user_id=tg_user.user_id)
+        )
+        await session.execute(
+            update(Transaction).where(Transaction.user_id == vk_user_id)
+            .values(user_id=tg_user.user_id)
+        )
+        await session.execute(
+            update(Notification).where(Notification.user_id == vk_user_id)
+            .values(user_id=tg_user.user_id)
+        )
+        await session.execute(
+            update(GiftCode).where(GiftCode.creator_id == vk_user_id)
+            .values(creator_id=tg_user.user_id)
+        )
+        await session.execute(
+            update(GiftCode).where(GiftCode.used_by == vk_user_id)
+            .values(used_by=tg_user.user_id)
+        )
+        # Переносим рефералов (кто ссылался на VK-юзера)
+        await session.execute(
+            update(User).where(User.referrer_id == vk_user_id)
+            .values(referrer_id=tg_user.user_id)
+        )
     else:
         # TG юзер есть — сливаем данные из VK в TG
+        # СНАЧАЛА переносим записи, ПОТОМ обновляем TG-юзера
+        
+        # Переносим все связанные записи с VK-юзера на TG-юзера
+        await session.execute(
+            update(PaymentInvoice).where(PaymentInvoice.user_id == vk_user_id)
+            .values(user_id=tg_user.user_id)
+        )
+        await session.execute(
+            update(Transaction).where(Transaction.user_id == vk_user_id)
+            .values(user_id=tg_user.user_id)
+        )
+        await session.execute(
+            update(Notification).where(Notification.user_id == vk_user_id)
+            .values(user_id=tg_user.user_id)
+        )
+        await session.execute(
+            update(GiftCode).where(GiftCode.creator_id == vk_user_id)
+            .values(creator_id=tg_user.user_id)
+        )
+        await session.execute(
+            update(GiftCode).where(GiftCode.used_by == vk_user_id)
+            .values(used_by=tg_user.user_id)
+        )
+        await session.execute(
+            update(User).where(User.referrer_id == vk_user_id)
+            .values(referrer_id=tg_user.user_id)
+        )
+        await session.flush()  # Гарантируем что UPDATE выполнится до DELETE
+        
+        # Сливаем данные
         if not tg_user.marzban_username and vk_marzban:
             tg_user.marzban_username = vk_marzban
         # Баланс суммируем
@@ -146,6 +197,8 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
         tg_user.vk_id = vk_id
         tg_user.platform = "both"
     
+    # СНАЧАЛА удаляем VK-юзера (теперь безопасно — все FK записи перенесены)
+    await session.delete(vk_user)
     await session.commit()
     
     logger.info(f"VK-TG link: TG user {user_id} linked to VK id {vk_id}")
