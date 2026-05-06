@@ -1,276 +1,111 @@
-# Nemo VPN Bot
+<div align="center">
 
-Telegram-бот для продажи и управления VPN-подписками на базе Marzban API с протоколом VLESS Reality.
+# 🌊 Nemo VPN — Telegram Bot
 
-## 📋 Описание
+**Full-featured Telegram bot for VPN subscription management**
 
-**Nemo VPN Bot** — это полноценное решение для продажи VPN-подписок через Telegram. Бот интегрируется с панелью управления Marzban и предоставляет пользователям удобный интерфейс для:
+[![Python](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://python.org)
+[![Aiogram](https://img.shields.io/badge/aiogram-3.x-26A5E4?logo=telegram&logoColor=white)](https://docs.aiogram.dev)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](https://docker.com)
+[![PostgreSQL](https://img.shields.io/badge/postgresql-15+-4169E1?logo=postgresql&logoColor=white)](https://postgresql.org)
+[![Marzban](https://img.shields.io/badge/marzban-API-orange)](https://marzban.dev)
+[![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF?logo=github-actions&logoColor=white)](https://github.com/shekelstrong/vpn_bot/actions)
+[![License](https://img.shields.io/badge/license-proprietary-red)](.)
 
-- Оформления бесплатного 24-часового триала
-- Покупки подписок через CryptoBot и банковские карты
-- Просмотра статистики использования трафика
-- Участия в 3-уровневой реферальной программе
-- Получения автоматических уведомлений об истечении подписки
+</div>
 
-## 🔧 Технические характеристики
+## ✨ Features
 
-- **Язык:** Python 3.10+
-- **Фреймворк:** aiogram 3.x (асинхронный)
-- **База данных:** PostgreSQL + SQLAlchemy 2.0 (Async)
-- **HTTP клиент:** httpx (асинхронный)
-- **Планировщик:** APScheduler (уведомления)
-- **Вебхуки:** aiohttp (для платежей)
-- **Запуск:** Polling (локально) + Webhooks (для платежей)
+- 🤖 **Telegram Bot** — Aiogram 3.x with FSM and inline keyboards
+- 💳 **CryptoBot + Platega** — crypto & card/SBP payments
+- 🚀 **VLESS Reality** — next-gen VPN protocol via Marzban API
+- 🛡 **Two tiers** — Standard VPN & Premium (bypass blocking)
+- 🔗 **VK↔TG Linking** — unified accounts across Telegram & VK
+- 📱 **Mini App** — Telegram Web App for subscription management
+- 👥 **3-level referrals** — earn from referred users
+- 🎁 **Gift codes** — share VPN with friends
+- 📊 **Admin panel** — user search, withdrawal management, stats
+- 🔄 **Auto-deploy** — CI/CD via GitHub Actions → server on push
 
-## 🚀 Быстрый старт
+## 🏗 Architecture
 
-### 1. Установка зависимостей
+```
+┌─────────────┐     ┌──────────────┐     ┌────────────┐
+│  Telegram   │────▶│  TG VPN Bot  │────▶│  Marzban   │
+│   Users     │     │  (Aiogram)   │     │    API     │
+└─────────────┘     └──────┬───────┘     └────────────┘
+                           │                    ▲
+                    ┌──────▼───────┐             │
+                    │  PostgreSQL  │             │
+                    │   + Redis    │             │
+                    └──────┬───────┘             │
+                           │                    │
+┌─────────────┐     ┌──────▼───────┐     ┌──────┴─────┐
+│  VK Users   │────▶│  VK Bot     │────▶│  Marzban   │
+│             │     │  (Vkbottle) │     │    API     │
+└─────────────┘     └──────────────┘     └────────────┘
+```
+
+## 🛠 Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Bot Framework | Aiogram 3.x |
+| Database | PostgreSQL 15 + SQLAlchemy (async) |
+| Cache | Redis |
+| VPN Panel | Marzban API |
+| Protocol | VLESS Reality |
+| Payments | CryptoBot, Platega |
+| Deploy | Docker Compose + GitHub Actions |
+| Mini App | Vanilla JS + Tailwind CSS |
+
+## ⚡ Quick Start
 
 ```bash
+# Clone
+git clone https://github.com/shekelstrong/vpn_bot.git
 cd vpn_bot
-pip install -r requirements.txt
+
+# Configure
+cp .env.example .env
+# Edit .env with your tokens and API keys
+
+# Run
+docker compose up -d
 ```
 
-### 2. Настройка переменных окружения
-
-Откройте файл `.env` и заполните значения:
-
-```env
-# Telegram Bot
-BOT_TOKEN=ваш_токен_от_BotFather
-ADMIN_IDS=ваш_TG_ID
-
-# Marzban API
-MARZBAN_URL=https://your-marzban-url.com
-MARZBAN_ADMIN_USERNAME=ваш_логин
-MARZBAN_ADMIN_PASSWORD=ваш_пароль
-
-# Database
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/vpn_bot
-
-# Payment Systems
-CRYPTO_BOT_TOKEN=токен_CryptoPay
-PLATEGA_SECRET_KEY=ключ_Platega
-```
-
-### 3. Запуск базы данных PostgreSQL
-
-**Вариант 1: Через Docker (рекомендуется)**
-```bash
-docker run -d \
-  --name nemo_vpn_db \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=vpn_bot \
-  -p 5432:5432 \
-  postgres:15-alpine
-```
-
-**Вариант 2: Локальная установка**
-- Установите PostgreSQL 15+
-- Создайте базу данных `vpn_bot`
-- Создайте пользователя `postgres` с паролем `postgres`
-
-### 4. Запуск бота
-
-Просто запустите файл `bot.py`:
-
-```bash
-python bot.py
-```
-
-Или через VS Code Terminal (Ctrl+` или Cmd+`):
-
-```bash
-cd vpn_bot
-python bot.py
-```
-
-### 5. Запуск вебхуков для платежей (на сервере)
-
-Для обработки платежей от CryptoBot и Platega на сервере запускается отдельный процесс:
-
-```bash
-python webhooks.py
-```
-
-Вебхук-сервер запустится на порту 8080:
-- `http://localhost:8080/webhook/crypto` — для CryptoBot
-- `http://localhost:8080/webhook/platega` — для Platega
-
-**Важно:** 
-- Вебхуки нужны только для приёма уведомлений об оплате
-- На локальной машине можно не запускать
-- На сервере запускается ОТДЕЛЬНО от основного бота
-
-## 📁 Структура проекта
+## 📁 Project Structure
 
 ```
 vpn_bot/
-├── bot.py                  # 🚀 Запуск бота (polling)
-├── webhooks.py             # 🔗 Вебхуки для платежей (сервер)
-├── config.py               # Конфигурация (Pydantic)
-├── requirements.txt        # Python зависимости
-├── .env                    # Переменные окружения
-├── .gitignore              # Игнорируемые файлы
-├── README.md               # Основная документация
-├── DEPLOYMENT.md           # Инструкция по развёртыванию
-├── WEBHOOKS_SETUP.md       # Настройка вебхуков
-├── CHANGELOG.md            # История изменений
-├── database/
-│   ├── models.py           # SQLAlchemy модели
-│   └── engine.py           # Движок БД
 ├── handlers/
-│   ├── start.py            # /start и главное меню
-│   ├── profile.py          # Профиль пользователя
-│   ├── buy.py              # Покупка подписки
-│   ├── trial.py            # Бесплатный триал
-│   ├── help.py             # Помощь и инструкции
-│   └── admin.py            # Админ-панель
-├── keyboards/
-│   ├── inline.py           # Inline-кнопки
-│   └── reply.py            # Reply-кнопки
+│   ├── admin/          # Admin panel & notifications
+│   ├── buy.py          # Purchase flow
+│   ├── start.py        # /start & onboarding
+│   ├── profile.py      # User profile & subscription info
+│   ├── vk_link.py      # VK↔TG account linking
+│   └── platega_webhook.py  # Card payment webhooks
 ├── services/
-│   ├── marzban_api.py      # Marzban API клиент
-│   ├── payment_crypto.py   # CryptoBot интеграция
-│   └── payment_platega.py  # Platega интеграция
-└── utils/
-    ├── scheduler.py        # Планировщик уведомлений
-    └── states.py           # FSM состояния
+│   ├── marzban_api.py   # Marzban API client
+│   ├── payment_crypto.py  # CryptoBot integration
+│   └── payment_platega.py # Platega integration
+├── database/
+│   ├── models.py        # SQLAlchemy models
+│   └── session.py       # Async DB sessions
+├── utils/
+│   └── webhook_server.py  # Mini App API server
+├── docker-compose.yml
+└── Dockerfile
 ```
 
-## 💡 Основные функции
+## 🔗 Related
 
-### Бесплатный триал
-- 24 часа доступа
-- Лимит трафика: 1 GB
-- Один триал на пользователя
-
-### Платные подписки
-| Срок | Цена | Экономия |
-|------|------|----------|
-| 1 месяц | 100₽ | - |
-| 3 месяца | 270₽ | 10% |
-| 6 месяцев | 500₽ | 17% |
-| 12 месяцев | 900₽ | 25% |
-
-### Платежные системы
-1. **CryptoBot** — криптовалюты (USDT, TON, Bitcoin)
-2. **Platega** — банковские карты РФ
-
-### Реферальная программа
-- 1 уровень — 15% от покупок
-- 2 уровень — 10% от покупок
-- 3 уровень — 5% от покупок
-
-### Уведомления
-Автоматические напоминания об истечении подписки:
-- За 7, 5, 3 дней
-- За 24, 12, 6, 3, 2, 1 часа
-
-## 🔐 Админ-панель
-
-Доступна только для пользователей из `ADMIN_IDS`.
-
-### Команды
-- `/admin` — открыть админ-панель
-- `/cancel` — отменить текущее действие
-
-### Возможности
-- 📊 Статистика (пользователи, выручка, конверсия)
-- 👥 Управление пользователями (поиск, просмотр)
-- 🎁 Выдача подарочных подписок
-- 📢 Рассылка сообщений всем пользователям
-- ⚙️ Настройки бота
-
-## 📱 Интеграция с Hiddify
-
-Бот рекомендует использовать **Hiddify Next** как универсальный клиент:
-
-1. Скачать приложение (Android, iOS, Windows, macOS)
-2. Скопировать ссылку на подписку из бота
-3. Импортировать в Hiddify из буфера обмена
-4. Подключиться к серверу
-
-## 🔧 Настройка VLESS Reality
-
-Протокол VLESS Reality использует современную технологию в формате обычной ссылки с максимальной скоростью и умной маршрутизацией для российских сервисов.
-
-### Параметры по умолчанию
-```env
-VLESS_PORT=8444
-VLESS_SNI=your-sni.com
-VLESS_PUBLIC_KEY=your-public-key
-VLESS_SHORT_ID=fb8e00
-VLESS_FINGERPRINT=chrome
-```
-
-## 🛠 Разработка
-
-### Локальный запуск без Docker
-
-1. Установите зависимости:
-```bash
-pip install -r requirements.txt
-```
-
-2. Настройте `.env` файл
-
-3. Запустите бота:
-```bash
-python bot.py
-```
-
-### Логирование
-
-Логи сохраняются в папку `logs/`:
-- `bot_YYYY-MM-DD.log` — ежедневные логи
-
-## 📊 Мониторинг
-
-### Проверка состояния
-```bash
-# Проверка контейнеров
-docker-compose ps
-
-# Просмотр логов
-docker-compose logs -f bot
-
-# Перезапуск бота
-docker-compose restart bot
-```
-
-### Команды для отладки
-- `/ping` — проверка работоспособности
-- `/me` — информация о пользователе
-- `/start` — главное меню
-
-## 🚨 Решение проблем
-
-### Бот не запускается
-1. Проверьте логи: `docker-compose logs bot`
-2. Убедитесь, что `.env` заполнен корректно
-3. Проверьте подключение к БД
-
-### Ошибки Marzban API
-1. Проверьте логин/пароль администратора
-2. Убедитесь, что Marzban доступен по URL
-3. Проверьте токен в логах
-
-### Платежи не работают
-1. Проверьте токены платежных систем
-2. Убедитесь, что вебхуки настроены корректно
-3. Проверьте логи на ошибки подписи
-
-## 📄 Лицензия
-
-Проект создан для внутреннего использования Nemo VPN.
-
-## 📞 Поддержка
-
-- Telegram: @nemo_vpn_support
-- Email: support@nemo-vpn.com
+- [VK Bot](https://github.com/shekelstrong/vpn-vk-bot) — VK Community version
+- [Mini App](https://github.com/shekelstrong/nemo-vpn-webapp) — Telegram Web App
+- [Nemo VPN Landing](https://github.com/shekelstrong/nemo-landing) — Website
 
 ---
 
-**Nemo VPN** — Надёжный VPN для свободы в интернете 🌐
+<div align="center">
+<sub>Built with ❤️ by <a href="https://github.com/shekelstrong">shekelstrong</a></sub>
+</div>
