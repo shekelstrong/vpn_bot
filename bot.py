@@ -45,6 +45,7 @@ from handlers.referrals import router as referrals_router
 from handlers.traffic_buy import router as traffic_buy_router
 from handlers.gift import router as gift_router
 from handlers.referral_buy import router as referral_buy_router
+from handlers.vk_link import link_router
 
 from services.crypto_bot_v2 import crypto_bot_v2_service
 from services.crypto_webhook import handle_crypto_webhook_update
@@ -66,7 +67,10 @@ async def update_trial_command_for_user(user_id: int, has_active_subscription: b
         base_commands.insert(4, BotCommand(command="trial", description="Пробный период"))
     if user_id in settings.admin_ids_list:
         base_commands.insert(0, BotCommand(command="admin", description="Админ-панель"))
-    await bot.set_my_commands(base_commands, scope=BotCommandScopeChat(chat_id=user_id))
+    try:
+        await bot.set_my_commands(base_commands, scope=BotCommandScopeChat(chat_id=user_id))
+    except Exception as e:
+        logger.warning(f"Failed to set commands for user {user_id}: {e}")
 
 
 async def update_trial_commands_for_all_users():
@@ -109,6 +113,8 @@ dp.include_router(referrals_router)
 dp.include_router(traffic_buy_router)
 dp.include_router(gift_router)
 dp.include_router(referral_buy_router)
+
+dp.include_router(link_router)
 
 
 @dp.message(Command("me"))
