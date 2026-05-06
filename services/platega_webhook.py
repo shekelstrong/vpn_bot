@@ -126,12 +126,164 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
         logger.error(f"Invalid order_id format: {order_id}")
         return False
 
+    # === Определяем платформу и парсим order_id ===
+    is_vk_gift = order_id.startswith("vkgift_")
+    is_vk = order_id.startswith("vk_") and not is_vk_gift
+
     if parts[0] == "platega":
+        # TG заказ: platega_USERID_...
         try:
             user_telegram_id = int(parts[1])
         except ValueError:
             logger.error(f"Cannot parse user_id: {order_id}")
             return False
+    elif is_vk or is_vk_gift:
+        # VK заказ: vk_tier_vkUserId_days_uuid  или  vkgift_tier_vkUserId_days_uuid
+        prefix = "vkgift_" if is_vk_gift else "vk_"
+        rest = order_id[len(prefix):]
+        vk_parts = rest.split("_")
+        if len(vk_parts) < 3:
+            logger.error(f"Cannot parse VK order_id: {order_id}")
+            return False
+        try:
+            vk_tier = vk_parts[0]
+            vk_user_id = int(vk_parts[1])
+            vk_days = int(vk_parts[2])
+        except (ValueError, IndexError):
+            logger.error(f"Cannot parse VK order_id fields: {order_id}")
+            return False
+        logger.info(f"🔵 [VK Platega] VK order: tier={vk_tier}, vk_user_id={vk_user_id}, days={vk_days}")
+
+        # Ищем юзера по vk_id в общей БД
+        async with get_session_factory()() as session:
+            result = await session.execute(select(User).where(User.vk_id == vk_user_id))
+            vk_user = result.scalar_one_or_none()
+            if not vk_user:
+                logger.error(f"❌ [VK Platega] User with vk_id={vk_user_id} not found in DB")
+                return False
+
+            logger.info(f"🔵 [VK Platega] Found user_id={vk_user.user_id} for vk_id={vk_user_id}")
+
+            # Для подарочных заказов — создаём подарочный код
+            if is_vk_gift:
+                import uuid as uuid_mod
+                gift_code = GiftCode(
+                    code=uuid_mod.uuid4().hex[:12].upper(),
+                    creator_id=vk_user.user_id,
+                    tier=vk_tier,
+                    days=vk_days,
+                    gb_limit=0,
+                    expires_at=datetime.utcnow() + timedelta(days=30),
+                )
+                session.add(gift_code)
+
+                invoice = PaymentInvoice(
+                    user_id=vk_user.user_id, invoice_id=str(order_id),
+                    amount=float(amount), currency="RUB", payment_method="platega",
+                    status="paid", payload=json.dumps({"type": "gift", "tier": vk_tier, "days": vk_days}),
+                    created_at=datetime.utcnow()
+                )
+                session.add(invoice)
+
+                tx = Transaction(
+                    user_id=vk_user.user_id, amount=float(amount), currency="RUB",
+                    payment_method="platega_gift", status="paid",
+                    payment_id=str(order_id),
+                    description=f"VK Подарочная подписка {vk_tier} {vk_days}д"
+                )
+                session.add(tx)
+                await session.commit()
+                await session.refresh(gift_code)
+
+                # Уведомляем дарителя через VK-бот
+                try:
+                    import httpx
+                    tier_name = "👑 Обход белых списков" if vk_tier == "premium" else "⚡ Обычный"
+                    msg = (
+                        f"✅ Оплата подарочной подписки подтверждена!\n\n"
+                        f"Тариф: {tier_name}\n"
+                        f"Длительность: {vk_days} дней\n\n"
+                        f"🎁 Ваш подарочный код: {gift_code.code}\n\n"
+                        f"Отправьте этот код другу!"
+                    )
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        await client.post(
+                            "http://127.0.0.1:8082/webhook/vk_notify",
+                            json={"vk_id": vk_user_id, "message": msg}
+                        )
+                except Exception as e:
+                    logger.warning(f"⚠️ [VK Platega] Cannot notify VK user: {e}")
+
+                for admin_id in settings.admin_ids_list:
+                    try:
+                        await bot.send_message(admin_id,
+                            f"🎁 <b>Подарок VK (Platega)</b>\n"
+                            f"VK ID: <code>{vk_user_id}</code>\n"
+                            f"Тариф: {vk_tier}, {vk_days}д\n"
+                            f"Сумма: {amount:.0f}₽",
+                            parse_mode="HTML")
+                    except:
+                        pass
+
+                logger.info(f"✅ [VK Platega] Gift code {gift_code.code} created for vk_id={vk_user_id}")
+                return True
+
+            # Обычная VK подписка — активируем через Marzban
+            from services.subscription import activate_subscription
+            success = await activate_subscription(vk_user, vk_tier, vk_days, "subscription")
+
+            if not success:
+                logger.error(f"❌ [VK Platega] Failed to activate subscription for vk_id={vk_user_id}")
+                return False
+
+            invoice = PaymentInvoice(
+                user_id=vk_user.user_id, invoice_id=str(order_id),
+                amount=float(amount), currency="RUB", payment_method="platega",
+                status="paid", payload=json.dumps({"days": vk_days, "tier": vk_tier, "type": "subscription"}),
+                created_at=datetime.utcnow()
+            )
+            session.add(invoice)
+
+            tx = Transaction(
+                user_id=vk_user.user_id, amount=float(amount), currency="RUB",
+                payment_method="platega", status="paid",
+                payment_id=str(order_id),
+                description=f"VK: {vk_tier} {vk_days}д"
+            )
+            session.add(tx)
+            await session.commit()
+
+            # Уведомляем юзера через VK-бот webhook
+            try:
+                import httpx
+                tier_name = "👑 Обход белых списков" if vk_tier == "premium" else "⚡ Обычный"
+                msg = (
+                    f"✅ Оплата подтверждена!\n\n"
+                    f"Тариф: {tier_name}\n"
+                    f"Длительность: {vk_days} дней\n\n"
+                    f"Нажмите «👤 Профиль» чтобы получить VPN ключ."
+                )
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(
+                        "http://127.0.0.1:8082/webhook/vk_notify",
+                        json={"vk_id": vk_user_id, "message": msg}
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ [VK Platega] Cannot notify VK user: {e}")
+
+            for admin_id in settings.admin_ids_list:
+                try:
+                    await bot.send_message(admin_id,
+                        f"💰 <b>Новое пополнение VK (Platega)</b>\n"
+                        f"VK ID: <code>{vk_user_id}</code>\n"
+                        f"Тариф: {vk_tier}, {vk_days}д\n"
+                        f"Сумма: {amount:.0f}₽",
+                        parse_mode="HTML")
+                except:
+                    pass
+
+            logger.info(f"✅ [VK Platega] Subscription activated: vk_id={vk_user_id}, tier={vk_tier}, days={vk_days}")
+            return True
     else:
         logger.error(f"Cannot parse order_id: {order_id}")
         return False
