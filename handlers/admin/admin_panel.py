@@ -211,6 +211,29 @@ async def admin_find_by_username(callback: types.CallbackQuery, state: FSMContex
     await callback.answer()
 
 
+
+
+@router.callback_query(F.data == "admin_find_by_vk_link")
+async def admin_find_by_vk_link(callback: types.CallbackQuery, state: FSMContext):
+    """Поиск пользователя по VK ссылке (screen name)."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await state.set_state(AdminPanel.waiting_for_user_search)
+    await state.update_data(search_type="vk_link")
+    
+    await callback.message.answer(
+        "🔍 Введите ссылку на VK пользователя:\n\n"
+        "Примеры:\n"
+        "• vk.com/vasily_nedopekin\n"
+        "• vasily_nedopekin\n"
+        "• 731577540 (VK ID)\n\n"
+        "Или нажмите /cancel для отмены."
+    )
+    
+    await callback.answer()
+
 @router.message(AdminPanel.waiting_for_user_search)
 async def process_user_search(message: types.Message, state: FSMContext, session: AsyncSession):
     """Обработка поиска пользователя."""
@@ -232,6 +255,57 @@ async def process_user_search(message: types.Message, state: FSMContext, session
             result = await session.execute(
                 select(User).where(User.vk_id == vk_id)
             )
+        elif search_type == "vk_link":
+            # Parse VK link: vk.com/username, @username, or just username
+            import httpx
+            import re
+            
+            # Extract screen name from URL
+            vk_pattern = r"(?:vk\.com/|@)?([a-zA-Z0-9_.]+)"
+            match = re.search(vk_pattern, search_value)
+            
+            if match:
+                screen_name = match.group(1)
+                # Try as numeric VK ID first
+                try:
+                    vk_id_int = int(screen_name)
+                    result = await session.execute(
+                        select(User).where(User.vk_id == vk_id_int)
+                    )
+                    user = result.scalar_one_or_none()
+                    if not user:
+                        await message.answer(f"❌ Пользователь с VK ID {vk_id_int} не найден.\n\nПопробуйте ещё раз или нажмите /cancel.")
+                        return
+                except ValueError:
+                    # Resolve screen name via VK API
+                    vk_token = settings.VK_TOKEN
+                    if not vk_token:
+                        await message.answer("❌ VK_TOKEN не настроен. Невозможно разрешить ссылку.")
+                        await state.clear()
+                        return
+                    
+                    try:
+                        async with httpx.AsyncClient(timeout=10) as client:
+                            resp = await client.get(
+                                "https://api.vk.com/method/utils.resolveScreenName",
+                                params={"screen_name": screen_name, "access_token": vk_token, "v": "5.199"}
+                            )
+                            data = resp.json()
+                            if "response" in data and data["response"]:
+                                vk_id_int = data["response"]["object_id"]
+                                result = await session.execute(
+                                    select(User).where(User.vk_id == vk_id_int)
+                                )
+                            else:
+                                await message.answer(f"❌ VK пользователь \"{screen_name}\" не найден.\n\nПопробуйте ещё раз или нажмите /cancel.")
+                                return
+                    except Exception as e:
+                        logger.error(f"VK resolve error: {e}")
+                        await message.answer(f"❌ Ошибка при поиске VK пользователя.\n\nПопробуйте ещё раз или нажмите /cancel.")
+                        return
+            else:
+                await message.answer("❌ Неверный формат VK ссылки.\n\nВведите vk.com/username или числовой VK ID.")
+                return
         else:
             username = search_value.lstrip("@")
             result = await session.execute(

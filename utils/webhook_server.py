@@ -375,7 +375,10 @@ class WebhookHandler:
                         "balance": user.balance,
                         "referral_balance": user.referral_balance,
                         "sub_url": sub_url,
-                        "vless_link": vless_link
+                        "vless_link": vless_link,
+                        "vk_id": user.vk_id,
+                        "vk_sub_url": await marzban_service.get_user_subscription(user.marzban_username_vk) if user.marzban_username_vk else "",
+                        "marzban_username_vk": user.marzban_username_vk
                     }
                 })
         except Exception as e:

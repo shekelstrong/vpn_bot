@@ -122,6 +122,7 @@ def get_admin_user_search_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Найти по Telegram ID 🔍", callback_data="admin_find_by_id", style="primary")
     builder.button(text="Найти по VK ID 🔗", callback_data="admin_find_by_vk_id", style="primary")
+    builder.button(text="Найти по VK ссылке 🔗", callback_data="admin_find_by_vk_link", style="primary")
     builder.button(text="Найти по username 👤", callback_data="admin_find_by_username", style="primary")
     builder.button(text="Назад ↩️", callback_data="admin_panel", style="danger")
     builder.adjust(1, 1)
