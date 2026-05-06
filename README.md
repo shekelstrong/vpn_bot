@@ -102,7 +102,7 @@ vpn_bot/
 
 - [VK Bot](https://github.com/shekelstrong/vpn-vk-bot) — VK Community version
 - [Mini App](https://github.com/shekelstrong/nemo-vpn-webapp) — Telegram Web App
-- [Nemo VPN Landing](https://github.com/shekelstrong/nemo-landing) — Website
+- [Nemo VPN Landing](https://nemo-landing-gamma.vercel.app/) — Website
 
 ---
 
