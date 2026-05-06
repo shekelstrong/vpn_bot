@@ -18,7 +18,8 @@ jobs:
           script: |
             cd /root/projects/vpn_bot
             git pull origin main
-            docker compose build --no-cache nemo_vpn_bot nemo_vpn_webhooks
+            docker compose build nemo_vpn_bot nemo_vpn_webhooks
             docker compose up -d nemo_vpn_bot nemo_vpn_webhooks
             sleep 5
             docker ps --format '{{.Names}} {{.Status}}' | grep nemo_vpn
+            echo "✅ Deploy complete!"
