@@ -138,7 +138,8 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
             logger.error(f"Cannot parse user_id: {order_id}")
             return False
     elif is_vk or is_vk_gift:
-        # VK заказ: vk_tier_vkUserId_days_uuid  или  vkgift_tier_vkUserId_days_uuid
+        # VK заказ — создаём инвойс в БД, VK-бот polling всё обработает
+        # (подписка, Marzban, уведомление в VK)
         prefix = "vkgift_" if is_vk_gift else "vk_"
         rest = order_id[len(prefix):]
         vk_parts = rest.split("_")
@@ -152,149 +153,48 @@ async def process_platega_payment(order_id: str, amount: Decimal, currency: str,
         except (ValueError, IndexError):
             logger.error(f"Cannot parse VK order_id fields: {order_id}")
             return False
-        logger.info(f"🔵 [VK Platega] VK order: tier={vk_tier}, vk_user_id={vk_user_id}, days={vk_days}")
 
-        # Ищем юзера по vk_id в общей БД
-        async with get_session_factory()() as session:
-            result = await session.execute(select(User).where(User.vk_id == vk_user_id))
-            vk_user = result.scalar_one_or_none()
-            if not vk_user:
-                logger.error(f"❌ [VK Platega] User with vk_id={vk_user_id} not found in DB")
-                return False
+        logger.info(f"VK Platega: VK order tier={vk_tier} vk_user_id={vk_user_id} days={vk_days} amount={amount}")
 
-            logger.info(f"🔵 [VK Platega] Found user_id={vk_user.user_id} for vk_id={vk_user_id}")
+        try:
+            async with get_session_factory()() as session:
+                # Находим юзера по vk_id
+                result = await session.execute(select(User).where(User.vk_id == vk_user_id))
+                vk_user = result.scalar_one_or_none()
+                if not vk_user:
+                    logger.error(f"VK Platega: User vk_id={vk_user_id} not found")
+                    return False
 
-            # Для подарочных заказов — создаём подарочный код
-            if is_vk_gift:
-                import uuid as uuid_mod
-                gift_code = GiftCode(
-                    code=uuid_mod.uuid4().hex[:12].upper(),
-                    creator_id=vk_user.user_id,
-                    tier=vk_tier,
-                    days=vk_days,
-                    gb_limit=0,
-                    expires_at=datetime.utcnow() + timedelta(days=30),
-                )
-                session.add(gift_code)
+                # Проверяем что инвойс не создан ранее
+                existing = await session.execute(select(PaymentInvoice).where(PaymentInvoice.invoice_id == str(order_id)))
+                if existing.scalar_one_or_none():
+                    logger.info(f"VK Platega: Invoice {order_id} already exists")
+                    return True
 
+                # Создаём инвойс со status=paid — VK-бот polling обработает активацию
                 invoice = PaymentInvoice(
-                    user_id=vk_user.user_id, invoice_id=str(order_id),
-                    amount=float(amount), currency="RUB", payment_method="platega",
-                    status="paid", payload=json.dumps({"type": "gift", "tier": vk_tier, "days": vk_days}),
-                    created_at=datetime.utcnow()
+                    user_id=vk_user.user_id,
+                    invoice_id=str(order_id),
+                    amount=float(amount),
+                    currency="RUB",
+                    payment_method="platega",
+                    status="paid",
+                    payload=json.dumps({
+                        "days": vk_days,
+                        "tier": vk_tier,
+                        "type": "gift" if is_vk_gift else "subscription",
+                        "vk_user_id": vk_user_id,
+                    }),
+                    created_at=datetime.utcnow(),
                 )
                 session.add(invoice)
-
-                tx = Transaction(
-                    user_id=vk_user.user_id, amount=float(amount), currency="RUB",
-                    payment_method="platega_gift", status="paid",
-                    payment_id=str(order_id),
-                    description=f"VK Подарочная подписка {vk_tier} {vk_days}д"
-                )
-                session.add(tx)
                 await session.commit()
-                await session.refresh(gift_code)
+                logger.info(f"VK Platega: Invoice created for vk_id={vk_user_id}, VK polling will activate")
+        except Exception as e:
+            logger.error(f"VK Platega: Error creating invoice: {e}")
+            return False
 
-                # Уведомление отправит VK-бот polling
-                logger.info(f"✅ [VK Platega] Gift code {gift_code.code} created, VK-бот polling отправит уведомление дарителю")
-
-                for admin_id in settings.admin_ids_list:
-                    try:
-                        await bot.send_message(admin_id,
-                            f"🎁 <b>Подарок VK (Platega)</b>\n"
-                            f"VK ID: <code>{vk_user_id}</code>\n"
-                            f"Тариф: {vk_tier}, {vk_days}д\n"
-                            f"Сумма: {amount:.0f}₽",
-                            parse_mode="HTML")
-                    except:
-                        pass
-
-                logger.info(f"✅ [VK Platega] Gift code {gift_code.code} created for vk_id={vk_user_id}")
-                return True
-
-            # Обычная VK подписка — активируем через Marzban + обновляем БД
-            now = datetime.utcnow()
-            if vk_tier == "premium":
-                if vk_user.expire_premium and vk_user.expire_premium > now:
-                    vk_user.expire_premium = vk_user.expire_premium + timedelta(days=vk_days)
-                else:
-                    vk_user.expire_premium = now + timedelta(days=vk_days)
-            else:
-                if vk_user.expire_standard and vk_user.expire_standard > now:
-                    vk_user.expire_standard = vk_user.expire_standard + timedelta(days=vk_days)
-                else:
-                    vk_user.expire_standard = now + timedelta(days=vk_days)
-
-            # Обновляем общий expire_date
-            expires = []
-            if vk_user.expire_standard and vk_user.expire_standard > now:
-                expires.append(vk_user.expire_standard)
-            if vk_user.expire_premium and vk_user.expire_premium > now:
-                expires.append(vk_user.expire_premium)
-            vk_user.expire_date = max(expires) if expires else now + timedelta(days=vk_days)
-            vk_user.tier = vk_tier
-
-            # Активируем/обновляем Marzban
-            if vk_user.marzban_username:
-                try:
-                    mz_user = await marzban_service.get_user(vk_user.marzban_username)
-                    if mz_user:
-                        active_inbounds = []
-                        if vk_user.expire_standard and vk_user.expire_standard > now:
-                            active_inbounds.append("vless-reality-standard")
-                        if vk_user.expire_premium and vk_user.expire_premium > now:
-                            active_inbounds.append("vless-reality-whitelist")
-                        await marzban_service.update_user_full(
-                            vk_user.marzban_username,
-                            extra_days=vk_days,
-                            tier=vk_tier,
-                            inbounds=active_inbounds if active_inbounds else None,
-                        )
-                except Exception as e:
-                    logger.error(f"❌ [VK Platega] Marzban update error: {e}")
-            else:
-                try:
-                    new_mz = await marzban_service.create_user(
-                        vk_user.user_id, vk_user.username or "", vk_days, tier=vk_tier
-                    )
-                    if new_mz:
-                        vk_user.marzban_username = new_mz.get("username")
-                except Exception as e:
-                    logger.error(f"❌ [VK Platega] Marzban create error: {e}")
-
-            invoice = PaymentInvoice(
-                user_id=vk_user.user_id, invoice_id=str(order_id),
-                amount=float(amount), currency="RUB", payment_method="platega",
-                status="paid", payload=json.dumps({"days": vk_days, "tier": vk_tier, "type": "subscription"}),
-                created_at=datetime.utcnow()
-            )
-            session.add(invoice)
-
-            tx = Transaction(
-                user_id=vk_user.user_id, amount=float(amount), currency="RUB",
-                payment_method="platega", status="paid",
-                payment_id=str(order_id),
-                description=f"VK: {vk_tier} {vk_days}д"
-            )
-            session.add(tx)
-            await session.commit()
-
-            # Уведомление отправит VK-бот polling, когда найдёт инвойс со status="paid"
-            logger.info(f"✅ [VK Platega] Subscription activated in DB+Marzban for vk_id={vk_user_id}, VK-бот polling отправит уведомление")
-
-            for admin_id in settings.admin_ids_list:
-                try:
-                    await bot.send_message(admin_id,
-                        f"💰 <b>Новое пополнение VK (Platega)</b>\n"
-                        f"VK ID: <code>{vk_user_id}</code>\n"
-                        f"Тариф: {vk_tier}, {vk_days}д\n"
-                        f"Сумма: {amount:.0f}₽",
-                        parse_mode="HTML")
-                except:
-                    pass
-
-            logger.info(f"✅ [VK Platega] Subscription activated: vk_id={vk_user_id}, tier={vk_tier}, days={vk_days}")
-            return True
+        return True
     else:
         logger.error(f"Cannot parse order_id: {order_id}")
         return False
