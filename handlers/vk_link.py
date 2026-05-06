@@ -1,7 +1,7 @@
 import re
 from aiogram import Router, F
 from aiogram.types import Message
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 from datetime import datetime, timedelta
@@ -16,6 +16,9 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
     
     VK бот сохраняет last_notified_step = 'tg_link:CODE:unix_timestamp'
     TG пользователь отправляет CODE → аккаунты связываются.
+    
+    Если VK-юзер уже существует в БД — сливаем его данные в TG-юзера
+    и удаляем VK-юзера (unique constraint на vk_id не даёт просто скопировать).
     """
     code = message.text.strip()
     user_id = message.from_user.id
@@ -36,11 +39,9 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
         return
     
     # Парсим timestamp из last_notified_step
-    # Формат: tg_link:CODE:unix_timestamp (число)
     try:
         parts = vk_user.last_notified_step.split(":")
         timestamp_str = parts[2]
-        # VK бот записывает Unix timestamp (int), а не ISO формат
         link_timestamp = datetime.utcfromtimestamp(int(timestamp_str))
     except (IndexError, ValueError, OSError) as e:
         logger.error(f"Failed to parse link timestamp: {vk_user.last_notified_step}, error: {e}")
@@ -61,31 +62,74 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
         )
         return
     
-    # === Привязываем аккаунты ===
+    # === Сливаем аккаунты ===
     
     # Получаем TG пользователя
     tg_result = await session.execute(select(User).where(User.user_id == user_id))
     tg_user = tg_result.scalar_one_or_none()
     
     if not tg_user:
+        # TG юзера нет — создаём с данными из VK
         tg_user = User(
             user_id=user_id,
             username=message.from_user.username,
             platform="both",
             vk_id=vk_user.vk_id,
+            marzban_username=vk_user.marzban_username,
+            is_trial_used=vk_user.is_trial_used,
+            balance=vk_user.balance,
+            referral_balance=vk_user.referral_balance,
+            referrer_id=vk_user.referrer_id,
+            expire_date=vk_user.expire_date,
+            tier=vk_user.tier,
+            device_count=vk_user.device_count,
+            gb_limit=vk_user.gb_limit,
+            expire_standard=vk_user.expire_standard,
+            expire_premium=vk_user.expire_premium,
+            channel_bonus_given=vk_user.channel_bonus_given,
+            refs_paid_count=vk_user.refs_paid_count,
+            task_channel_sub=vk_user.task_channel_sub,
         )
         session.add(tg_user)
+        # Удаляем VK-юзера (его данные перенесены)
+        await session.delete(vk_user)
     else:
+        # TG юзер есть — сливаем данные из VK в TG
+        # Переносим только если в TG пусто, чтобы не затереть
+        if not tg_user.marzban_username and vk_user.marzban_username:
+            tg_user.marzban_username = vk_user.marzban_username
+        # Баланс суммируем
+        tg_user.balance = (tg_user.balance or 0) + (vk_user.balance or 0)
+        tg_user.referral_balance = (tg_user.referral_balance or 0) + (vk_user.referral_balance or 0)
+        # Переносим expire_date — берём максимальный
+        if vk_user.expire_date:
+            if not tg_user.expire_date or vk_user.expire_date > tg_user.expire_date:
+                tg_user.expire_date = vk_user.expire_date
+        if vk_user.expire_standard:
+            if not tg_user.expire_standard or vk_user.expire_standard > tg_user.expire_standard:
+                tg_user.expire_standard = vk_user.expire_standard
+        if vk_user.expire_premium:
+            if not tg_user.expire_premium or vk_user.expire_premium > tg_user.expire_premium:
+                tg_user.expire_premium = vk_user.expire_premium
+        # Переносим tier если VK-юзер имеет более высокий
+        if vk_user.tier == "premium" and tg_user.tier != "premium":
+            tg_user.tier = "premium"
+        # Переносим подписки/флаги
+        if vk_user.is_trial_used and not tg_user.is_trial_used:
+            tg_user.is_trial_used = True
+        if vk_user.channel_bonus_given and not tg_user.channel_bonus_given:
+            tg_user.channel_bonus_given = True
+        # Суммируем реферальные счётчики
+        tg_user.refs_paid_count = (tg_user.refs_paid_count or 0) + (vk_user.refs_paid_count or 0)
+        # Привязываем VK
         tg_user.vk_id = vk_user.vk_id
         tg_user.platform = "both"
-    
-    # Обновляем VK пользователя
-    vk_user.platform = "both"
-    vk_user.last_notified_step = None
+        # Удаляем VK-юзера (чтобы освободить unique constraint на vk_id)
+        await session.delete(vk_user)
     
     await session.commit()
     
-    logger.info(f"VK-TG link: TG user {user_id} linked to VK user {vk_user.user_id} (vk_id={vk_user.vk_id})")
+    logger.info(f"VK-TG link: TG user {user_id} linked to VK id {vk_user.vk_id} (merged from VK user {vk_user.user_id})")
     
     await message.answer(
         "✅ <b>Аккаунты успешно связаны!</b>\n\n"
