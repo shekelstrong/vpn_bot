@@ -21,8 +21,9 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
     - TG: marzban_username (существующий TG-аккаунт в Marzban)
     - VK: marzban_username_vk (VK-аккаунт в Marzban)
     
-    У VK-подписки свой срок (expire_standard/expire_premium),
-    и при оплате через VK активируется marzban_username_vk.
+    ВАЖНО: Сначала удаляем VK-юзера (освобождаем vk_id unique constraint),
+    потом задаём vk_id на TG-юзере. Иначе UniqueViolation.
+    Используем два отдельных commit для гарантии порядка.
     """
     code = message.text.strip()
     user_id = message.from_user.id
@@ -69,7 +70,7 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
     # Сохраняем данные VK-юзера перед удалением
     vk_id = vk_user.vk_id
     vk_user_id = vk_user.user_id
-    vk_marzban = vk_user.marzban_username  # VK Marzban аккаунт
+    vk_marzban = vk_user.marzban_username
     vk_is_trial = vk_user.is_trial_used
     vk_balance = vk_user.balance or 0
     vk_referral_balance = vk_user.referral_balance or 0
@@ -84,19 +85,61 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
     vk_refs_paid = vk_user.refs_paid_count or 0
     vk_task_channel_sub = vk_user.task_channel_sub
     
-    # Получаем или создаём TG пользователя
+    # Получаем TG пользователя
     tg_result = await session.execute(select(User).where(User.user_id == user_id))
     tg_user = tg_result.scalar_one_or_none()
     
+    # === ШАГ 1: Переносим FK-записи и удаляем VK-юзера ===
+    # Это нужно сделать ДО задания vk_id на TG-юзере
+    
+    # Переносим FK записи
+    await session.execute(
+        update(PaymentInvoice).where(PaymentInvoice.user_id == vk_user_id)
+        .values(user_id=user_id)
+    )
+    await session.execute(
+        update(Transaction).where(Transaction.user_id == vk_user_id)
+        .values(user_id=user_id)
+    )
+    await session.execute(
+        update(Notification).where(Notification.user_id == vk_user_id)
+        .values(user_id=user_id)
+    )
+    await session.execute(
+        update(GiftCode).where(GiftCode.creator_id == vk_user_id)
+        .values(creator_id=user_id)
+    )
+    await session.execute(
+        update(GiftCode).where(GiftCode.used_by == vk_user_id)
+        .values(used_by=user_id)
+    )
+    await session.execute(
+        update(User).where(User.referrer_id == vk_user_id)
+        .values(referrer_id=user_id)
+    )
+    
+    # Удаляем VK-юзера
+    await session.delete(vk_user)
+    
+    # COMMIT #1: FK записи перенесены, VK-юзер удалён, vk_id свободен
+    await session.commit()
+    
+    # === ШАГ 2: Обновляем TG-юзера ===
+    # Теперь vk_id=731577540 свободен, можно устанавливать
+    
+    # Перезаражаем TG-юзера (сессия сброшена после commit)
+    tg_result2 = await session.execute(select(User).where(User.user_id == user_id))
+    tg_user = tg_result2.scalar_one_or_none()
+    
     if not tg_user:
-        # TG юзера нет — создаём с данными из VK
+        # TG юзер не existed — создаём
         tg_user = User(
             user_id=user_id,
             username=message.from_user.username,
             platform="both",
             vk_id=vk_id,
-            marzban_username=None,  # TG-юзер ещё не покупал — нет TG Marzban
-            marzban_username_vk=vk_marzban,  # VK Marzban сохраняем отдельно
+            marzban_username=None,
+            marzban_username_vk=vk_marzban,
             is_trial_used=vk_is_trial,
             balance=vk_balance,
             referral_balance=vk_referral_balance,
@@ -112,25 +155,11 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
             task_channel_sub=vk_task_channel_sub,
         )
         session.add(tg_user)
-        await session.flush()
-        
-        # Переносим связанные записи
-        await _transfer_fk_records(session, vk_user_id, tg_user.user_id)
     else:
-        # TG юзер есть — сливаем данные из VK
-        # СНАЧАЛА переносим записи, ПОТОМ обновляем
-        
-        # Переносим связанные записи с VK-юзера на TG-юзера
-        await _transfer_fk_records(session, vk_user_id, tg_user.user_id)
-        
-        # VK Marzban аккаунт сохраняем отдельно
+        # TG юзер есть — сливаем данные
         if vk_marzban and not tg_user.marzban_username_vk:
             tg_user.marzban_username_vk = vk_marzban
-        elif vk_marzban and tg_user.marzban_username_vk:
-            # Оба есть — оставляем тот у которого подписка активнее
-            logger.info(f"VK-TG link: Both VK Marzban accounts exist, keeping tg_user.marzban_username_vk={tg_user.marzban_username_vk}")
         
-        # Сливаем данные подписок — берём максимум
         if vk_expire_standard:
             if not tg_user.expire_standard or vk_expire_standard > tg_user.expire_standard:
                 tg_user.expire_standard = vk_expire_standard
@@ -138,37 +167,31 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
             if not tg_user.expire_premium or vk_expire_premium > tg_user.expire_premium:
                 tg_user.expire_premium = vk_expire_premium
         
-        # Пересчитываем единый expire_date
         dates = [d for d in [tg_user.expire_standard, tg_user.expire_premium] if d is not None]
         if dates:
             tg_user.expire_date = max(dates)
         
-        # Баланс суммируем
         tg_user.balance = (tg_user.balance or 0) + vk_balance
         tg_user.referral_balance = (tg_user.referral_balance or 0) + vk_referral_balance
         
-        # Tier — берём максимальный
         if vk_tier == "premium" and tg_user.tier != "premium":
             tg_user.tier = "premium"
         
-        # Флаги
         if vk_is_trial and not tg_user.is_trial_used:
             tg_user.is_trial_used = True
         if vk_channel_bonus and not tg_user.channel_bonus_given:
             tg_user.channel_bonus_given = True
         tg_user.refs_paid_count = (tg_user.refs_paid_count or 0) + vk_refs_paid
         
-        # Привязываем VK
+        # Привязываем VK — теперь безопасно, vk_id свободен
         tg_user.vk_id = vk_id
         tg_user.platform = "both"
     
-    # Удаляем VK-юзера (теперь безопасно — FK записи перенесены)
-    await session.delete(vk_user)
+    # COMMIT #2
     await session.commit()
     
     logger.info(f"VK-TG link: TG user {user_id} linked to VK id {vk_id}, VK Marzban: {tg_user.marzban_username_vk}, TG Marzban: {tg_user.marzban_username}")
     
-    # Формируем сообщение
     vk_config = "✅" if tg_user.marzban_username_vk else "❌"
     tg_config = "✅" if tg_user.marzban_username else "❌"
     
@@ -183,32 +206,3 @@ async def handle_vk_link_code(message: Message, session: AsyncSession):
         "Нажмите «👤 Профиль» чтобы увидеть ваши VPN ключи.",
         parse_mode="HTML"
     )
-
-
-async def _transfer_fk_records(session: AsyncSession, from_user_id: int, to_user_id: int):
-    """Перенести все FK-связанные записи с одного юзера на другого."""
-    await session.execute(
-        update(PaymentInvoice).where(PaymentInvoice.user_id == from_user_id)
-        .values(user_id=to_user_id)
-    )
-    await session.execute(
-        update(Transaction).where(Transaction.user_id == from_user_id)
-        .values(user_id=to_user_id)
-    )
-    await session.execute(
-        update(Notification).where(Notification.user_id == from_user_id)
-        .values(user_id=to_user_id)
-    )
-    await session.execute(
-        update(GiftCode).where(GiftCode.creator_id == from_user_id)
-        .values(creator_id=to_user_id)
-    )
-    await session.execute(
-        update(GiftCode).where(GiftCode.used_by == from_user_id)
-        .values(used_by=to_user_id)
-    )
-    await session.execute(
-        update(User).where(User.referrer_id == from_user_id)
-        .values(referrer_id=to_user_id)
-    )
-    await session.flush()

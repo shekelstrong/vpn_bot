@@ -175,6 +175,24 @@ async def admin_find_by_id(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(F.data == "admin_find_by_vk_id")
+async def admin_find_by_vk_id(callback: types.CallbackQuery, state: FSMContext):
+    """Поиск пользователя по VK ID."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await state.set_state(AdminPanel.waiting_for_user_search)
+    await state.update_data(search_type="vk_id")
+    
+    await callback.message.answer(
+        "🔍 Введите VK ID пользователя (число):\n\n"
+        "Или нажмите /cancel для отмены."
+    )
+    
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_find_by_username")
 async def admin_find_by_username(callback: types.CallbackQuery, state: FSMContext):
     """Поиск пользователя по username."""
