@@ -1,40 +1,24 @@
-name: Deploy VPN Bot to Server
+name: Deploy TG VPN Bot
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          host: ${{ secrets.SERVER_HOST }}
+          username: root
+          key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            # Переходим в папку с проектом
-            cd ~/projects/vpn_bot
-
-            # Даем серверу временный токен доступа к приватному репозиторию
-            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-            
-            # Жестко принудительно синхронизируем сервер с GitHub
-            git fetch origin
-            git reset --hard origin/main
-
-            # Создаем папку для логов и выдаем права, чтобы бот мог туда писать
-            mkdir -p logs
-            chmod 777 logs
-
-            # Полная остановка и пересборка без кэша
-            docker compose down
-            docker compose build --no-cache
-            docker compose up -d --remove-orphans
-            
-            # Очистка старых образов для экономии места
-            docker image prune -f
+            cd /root/projects/vpn_bot
+            git pull origin main
+            docker compose build --no-cache nemo_vpn_bot nemo_vpn_webhooks
+            docker compose up -d nemo_vpn_bot nemo_vpn_webhooks
+            sleep 5
+            docker ps --format '{{.Names}} {{.Status}}' | grep nemo_vpn
