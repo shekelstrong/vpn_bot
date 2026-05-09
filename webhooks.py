@@ -6,8 +6,10 @@
 1. Два тарифа одновременно — inbound-ы суммируются (standard + premium)
 2. Раздельные сроки: expire_standard и expire_premium в БД
 3. Бонус +3 дня за подписку на @nemo_vpn_official (один раз)
-4. Уведомление пользователю: ключи, инструкция (Happ, не V2Box)
+4. Уведомление пользователю: ключи, инструкция (Hiddify, не V2Box/Happ)
 5. Marzban: expire = max(expire_standard, expire_premium), inbounds = активные тарифы
+6. Добавлен /sing-box к URL подписок
+7. Убраны ключи маршрутизации (happ://routing)
 """
 
 import asyncio
@@ -45,6 +47,13 @@ logger.add(
 log_path = Path("logs")
 log_path.mkdir(exist_ok=True)
 logger.add(log_path / "webhooks_{time:YYYY-MM-DD}.log", rotation="00:00", retention="7 days", level="DEBUG")
+
+
+def append_sing_box(url: str) -> str:
+    """Добавить /sing-box к URL подписки, если ещё не добавлен."""
+    if url and not url.endswith("/sing-box"):
+        return f"{url.rstrip('/')}/sing-box"
+    return url
 
 
 def validate_webhook_signature(body_text: str, signature: str, token: Optional[str] = None) -> bool:
@@ -363,6 +372,9 @@ class WebhookHandler:
                         sub_url = await marzban_service.get_user_subscription(user.marzban_username)
                         vless_link = await marzban_service.get_user_vless_link(user.marzban_username)
 
+                    # Добавляем /sing-box к подписке
+                    sub_url = append_sing_box(sub_url)
+
                     msg = (
                         f"✅ <b>Оплата прошла успешно!</b>\n\n"
                         f"💎 Тариф: <b>{tier_name}</b>\n"
@@ -380,27 +392,16 @@ class WebhookHandler:
                             f"<code>{sub_url}</code>\n\n"
                             f"📖 <b>Инструкция по подключению:</b>\n"
                             f"1. Нажмите на ключ выше, чтобы скопировать.\n"
-                            f"2. Откройте приложение <b>Happ</b>.\n"
+                            f"2. Откройте приложение <b>Hiddify</b>.\n"
                             f"3. Нажмите «+» → <b>Import from Clipboard</b>.\n"
                             f"4. Обновите подписку и выберите сервер.\n"
                             f"5. Нажмите кнопку подключения — готово! 🎉\n\n"
-                            f"📱 <b>Скачать Happ:</b>\n"
-                            f"• <a href='https://apps.apple.com/us/app/happ-proxy-utility/id6504287215'>iOS / macOS</a>\n"
-                            f"• <a href='https://play.google.com/store/apps/details?id=com.happproxy'>Android</a>\n"
-                            f"• <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe'>Windows</a>\n"
-                            f"• <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest'>Linux</a>\n\n"
+                            f"📱 <b>Скачать Hiddify:</b>\n"
+                            f"• <a href='https://apps.apple.com/us/app/hiddify-proxy/id6444588589'>iOS / macOS</a>\n"
+                            f"• <a href='https://play.google.com/store/apps/details?id=app.hiddify.com'>Android</a>\n"
+                            f"• <a href='https://github.com/hiddify/hiddify-app/releases/latest'>Windows</a>\n"
+                            f"• <a href='https://github.com/hiddify/hiddify-app/releases/latest'>Linux</a>\n\n"
                         )
-                        if tier == "premium":
-                            msg += (
-                                "💎 <b>VIP: Ключ маршрутизации (обход белых списков)</b>\n\n"
-                                "Для корректной работы российских сервисов напрямую, "
-                                "а заблокированных через VPN — примените ключ маршрутизации:\n\n"
-                                "🔑 <b>Для Happ (все платформы):</b>\n"
-                                "<code>happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0=</code>\n\n"
-                                f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>\n\n"
-                                "Российские сервисы будут работать напрямую, а заблокированные — через VPN. "
-                                "Это делает ваш серфинг невидимым для проверок РКН! 🔒\n"
-                            )
                     else:
                         msg += "🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
 

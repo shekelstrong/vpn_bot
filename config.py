@@ -3,9 +3,9 @@
 
 ИЗМЕНЕНИЯ:
 1. Добавлен CHANNEL_USERNAME — Telegram канал для бонуса
-2. Добавлены ссылки на скачивание Happ для всех платформ
+2. Добавлены ссылки на скачивание Hiddify для всех платформ
 3. Добавлены GB_LIMITS для VIP-тарифов по длительности
-4. Убраны упоминания V2Box
+4. Убраны упоминания V2Box/Happ, заменены на Hiddify
 """
 
 from pydantic_settings import BaseSettings
@@ -85,22 +85,22 @@ class Settings(BaseSettings):
         description="Интервалы уведомлений в минутах"
     )
 
-    # Ссылки на Happ
-    HAPPL_IOS_URL: str = Field(
-        default="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
-        description="Ссылка на Happ в App Store"
+    # Ссылки на Hiddify
+    HIDDIFY_IOS_URL: str = Field(
+        default="https://apps.apple.com/us/app/hiddify-proxy/id6444588589",
+        description="Ссылка на Hiddify в App Store"
     )
-    HAPPL_ANDROID_URL: str = Field(
-        default="https://play.google.com/store/apps/details?id=com.happproxy",
-        description="Ссылка на Happ в Google Play"
+    HIDDIFY_ANDROID_URL: str = Field(
+        default="https://play.google.com/store/apps/details?id=app.hiddify.com",
+        description="Ссылка на Hiddify в Google Play"
     )
-    HAPPL_WINDOWS_URL: str = Field(
-        default="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
-        description="Ссылка на Happ для Windows"
+    HIDDIFY_WINDOWS_URL: str = Field(
+        default="https://github.com/hiddify/hiddify-app/releases/latest",
+        description="Ссылка на Hiddify для Windows"
     )
-    HAPPL_LINUX_URL: str = Field(
-        default="https://github.com/Happ-proxy/happ-desktop/releases/latest",
-        description="Ссылка на Happ для Linux"
+    HIDDIFY_LINUX_URL: str = Field(
+        default="https://github.com/hiddify/hiddify-app/releases/latest",
+        description="Ссылка на Hiddify для Linux"
     )
 
     # GB лимиты для VIP по длительности подписки
