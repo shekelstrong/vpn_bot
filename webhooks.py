@@ -32,6 +32,16 @@ from handlers.admin.notifications import (
     notify_referrer_payment
 )
 
+# Ключ маршрутизации Happ (обход белых списков, РФ напрямую + DNS без утечек)
+ROUTE_HAPP = "happ://routing/add/eyJOYW1lIjoi0KDQpCIsIkdsb2JhbFByb3h5Ijp0cnVlLCJEb21haW5TdHJhdGVneSI6IklQSWZOb25NYXRjaCIsIlJvdXRlT3JkZXIiOiJibG9jay1kaXJlY3QtcHJveHkiLCJEaXJlY3RTaXRlcyI6WyJnZW9zaXRlOmNhdGVnb3J5LXJ1Il0sIkRpcmVjdElwIjpbIjEwLjAuMC4wLzgiLCIxMDAuNjQuMC4wLzEwIiwiMTcyLjE2LjAuMC8xMiIsIjE5Mi4xNjguMC4wLzE2IiwiMTY5LjI1NC4wLjAvMTYiLCIyMjQuMC4wLjAvNCIsIjI1NS4yNTUuMjU1LjI1NSIsImdlb2lwOnJ1Il0sIlByb3h5U2l0ZXMiOltdLCJQcm94eUlwIjpbXSwiQmxvY2tTaXRlcyI6WyJnZW9zaXRlOmFkcyJdLCJCbG9ja0lwIjpbXSwiRG9tZXN0aWNETlNUeXBlIjoiRG9IIiwiRG9tZXN0aWNETlNJcCI6Ijc3Ljg4LjguOCIsIkRvbWVzdGljRE5TRG9tYWluIjoiaHR0cHM6Ly83Ny44OC44LjgvZG5zLXF1ZXJ5IiwiUmVtb3RlRE5TVHlwZSI6IkRvSCIsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOi8vY2xvdWRmbGFyZS1kbnMuY29tL2Rucy1xdWVyeSIsIkRuc0hvc3RzIjp7ImxrZmwyLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE3NSIsImxrbnBkLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE4MSJ9LCJHZW9pcFVybCI6Imh0dHBzOi8vZ2l0aHViLmNvbS9Mb3lhbHNvbGRpZXIvdjJyYXktcnVsZXMtZGF0L3JlbGVhc2VzL2xhdGVzdC9kb3dubG9hZC9nZW9pcC5kYXQiLCJHZW9zaXRlVXJsIjoiaHR0cHM6Ly9naXRodWIuY29tL0xveWFsc29sZGllci92MnJheS1ydWxlcy1kYXQvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL2dlb3NpdGUuZGF0IiwiRmFrZURucyI6ZmFsc2UsIlVzZUNodW5rRmlsZXMiOnRydWUsIkxhc3RVcGRhdGVkIjowfQ=="
+
+
+def append_singbox(url: str) -> str:
+    """Добавить /sing-box к URL подписки, если ещё не добавлен."""
+    if url and not url.endswith("/sing-box"):
+        return f"{url.rstrip('/')}/sing-box"
+    return url
+
 # Канал Nemo VPN
 CHANNEL_USERNAME = settings.CHANNEL_USERNAME
 
@@ -362,6 +372,7 @@ class WebhookHandler:
                     if user.marzban_username:
                         sub_url = await marzban_service.get_user_subscription(user.marzban_username)
                         vless_link = await marzban_service.get_user_vless_link(user.marzban_username)
+                        sub_url = append_singbox(sub_url)
 
                     msg = (
                         f"✅ <b>Оплата прошла успешно!</b>\n\n"
@@ -392,19 +403,30 @@ class WebhookHandler:
                         )
                         if tier == "premium":
                             msg += (
-                                "💎 <b>VIP: Ключ маршрутизации (обход белых списков)</b>\n\n"
-                                "Для корректной работы российских сервисов напрямую, "
-                                "а заблокированных через VPN — примените ключ маршрутизации:\n\n"
-                                "🔑 <b>Для Happ (все платформы):</b>\n"
-                                "<code>happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0=</code>\n\n"
+                                "💎 <b>Настройка маршрутизации (VIP):</b>\n\n"
+                                "Российские сайты будут работать напрямую, а заблокированные — через VPN. "
+                                "Нажмите кнопку ниже, чтобы применить ключ маршрутизации.\n\n"
                                 f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>\n\n"
-                                "Российские сервисы будут работать напрямую, а заблокированные — через VPN. "
-                                "Это делает ваш серфинг невидимым для проверок РКН! 🔒\n"
+                                "На уровне сервера для вас включен БЛОК на посещение RU-сервисов через VPN — "
+                                "они работают только напрямую, что делает ваш серфинг невидимым для проверок! 🔒\n"
                             )
                     else:
                         msg += "🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
 
                     await bot.send_message(tg_user_id, msg, parse_mode="HTML", disable_web_page_preview=True)
+
+                    if sub_url and tier == "premium":
+                        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                        routing_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                            [InlineKeyboardButton(text="🔑 Импортировать маршрутизацию в Happ", url=ROUTE_HAPP)]
+                        ])
+                        await bot.send_message(
+                            tg_user_id,
+                            "👆 Нажмите кнопку выше, чтобы автоматически применить маршрутизацию в Happ.",
+                            reply_markup=routing_keyboard,
+                            parse_mode="HTML"
+                        )
+
                     logger.info(f"Уведомление об успешной покупке доставлено пользователю {tg_user_id}")
                 except Exception as e:
                     logger.warning(f"Не удалось отправить сообщение об успехе пользователю {tg_user_id}: {e}")

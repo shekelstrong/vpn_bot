@@ -13,6 +13,7 @@ from typing import List, Dict, Optional
 
 from loguru import logger
 from config import settings
+from handlers.profile import append_singbox, ROUTE_HAPP
 
 
 def get_user_link(user_id: int, username: Optional[str] = None) -> str:
@@ -209,6 +210,7 @@ async def notify_user_purchase(
                 if subscription_url and subscription_url.startswith("/"):
                     base_url = settings.MARZBAN_URL.rstrip("/")
                     subscription_url = f"{base_url}{subscription_url}"
+                subscription_url = append_singbox(subscription_url)
         except Exception as e:
             logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
     
@@ -238,27 +240,21 @@ async def notify_user_purchase(
     )
 
     if tier == "premium":
-        # Дополнение для VIP тарифа
+        # Дополнение для VIP тарифа — inline-кнопка для маршрутизации
         premium_note = (
             "🚀 <b>Настройка умной маршрутизации (VIP):</b>\n\n"
-            "Мы специально не встраиваем обход блокировок в основной ключ, чтобы максимально скрыть работу VPN от систем РКН. "
-            "Для корректной работы российских сервисов напрямую, а заблокированных через VPN, "
-            "примените ключ маршрутизации для вашего приложения:\n\n"
-            "🔑 <b>Для Happ (все платформы):</b>\n"
-            "<code>happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0=</code>\n"
-            f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/51'><b>Видео-инструкция для Happ</b></a>\n\n"
-            "🔑 <b>Для Happ (Android / Windows / Apple):</b>\n"
-            "<code>happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0=</code>\n"
-            f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция для Happ</b></a>\n\n"
+            "Российские сайты будут работать напрямую от вашего провайдера, "
+            "а заблокированные — через VPN. Нажмите кнопку ниже, чтобы применить ключ маршрутизации:\n\n"
+            f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>\n\n"
             "На уровне нашего сервера для вас включен жесткий БЛОК на посещение РУ-сервисов через VPN, "
-            "поэтому они будут работать только напрямую с вашего провайдера — это делает ваш серфинг невидимым для проверок!"
+            "поэтому они будут работать только напрямую — это делает ваш серфинг невидимым для проверок!"
         )
         final_message = instruction_base + premium_note
     else:
         final_message = instruction_base + "Приятного пользования Nemo VPN! 🌊"
 
     try:
-        # 1. Отправляем основное текстовое сообщение (disable_web_page_preview=True, чтобы не было гигантских превью от ссылок)
+        # 1. Отправляем основное текстовое сообщение
         await bot.send_message(
             user_id, 
             final_message, 
@@ -266,7 +262,19 @@ async def notify_user_purchase(
             disable_web_page_preview=True
         )
         
-        # 2. Если удалось получить ссылку, генерируем и отправляем QR-код отдельно
+        # 2. Для VIP — отправляем inline-кнопку маршрутизации
+        if tier == "premium":
+            routing_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔑 Импортировать маршрутизацию в Happ", url=ROUTE_HAPP)]
+            ])
+            await bot.send_message(
+                user_id,
+                "👆 Нажмите кнопку выше, чтобы автоматически применить маршрутизацию в Happ.",
+                reply_markup=routing_keyboard,
+                parse_mode="HTML"
+            )
+        
+        # 3. Если удалось получить ссылку, генерируем и отправляем QR-код отдельно
         if subscription_url:
             qr_file = generate_qr(subscription_url)
             await bot.send_photo(

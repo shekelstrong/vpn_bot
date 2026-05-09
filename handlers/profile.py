@@ -26,8 +26,15 @@ from config import settings, get_db_setting
 
 router = Router()
 
-# Ключ маршрутизации Happ (обход белых списков)
-ROUTE_HAPP = "happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0="
+# Ключ маршрутизации Happ (обход белых списков, РФ напрямую + DNS без утечек)
+ROUTE_HAPP = "happ://routing/add/eyJOYW1lIjoi0KDQpCIsIkdsb2JhbFByb3h5Ijp0cnVlLCJEb21haW5TdHJhdGVneSI6IklQSWZOb25NYXRjaCIsIlJvdXRlT3JkZXIiOiJibG9jay1kaXJlY3QtcHJveHkiLCJEaXJlY3RTaXRlcyI6WyJnZW9zaXRlOmNhdGVnb3J5LXJ1Il0sIkRpcmVjdElwIjpbIjEwLjAuMC4wLzgiLCIxMDAuNjQuMC4wLzEwIiwiMTcyLjE2LjAuMC8xMiIsIjE5Mi4xNjguMC4wLzE2IiwiMTY5LjI1NC4wLjAvMTYiLCIyMjQuMC4wLjAvNCIsIjI1NS4yNTUuMjU1LjI1NSIsImdlb2lwOnJ1Il0sIlByb3h5U2l0ZXMiOltdLCJQcm94eUlwIjpbXSwiQmxvY2tTaXRlcyI6WyJnZW9zaXRlOmFkcyJdLCJCbG9ja0lwIjpbXSwiRG9tZXN0aWNETlNUeXBlIjoiRG9IIiwiRG9tZXN0aWNETlNJcCI6Ijc3Ljg4LjguOCIsIkRvbWVzdGljRE5TRG9tYWluIjoiaHR0cHM6Ly83Ny44OC44LjgvZG5zLXF1ZXJ5IiwiUmVtb3RlRE5TVHlwZSI6IkRvSCIsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOi8vY2xvdWRmbGFyZS1kbnMuY29tL2Rucy1xdWVyeSIsIkRuc0hvc3RzIjp7ImxrZmwyLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE3NSIsImxrbnBkLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE4MSJ9LCJHZW9pcFVybCI6Imh0dHBzOi8vZ2l0aHViLmNvbS9Mb3lhbHNvbGRpZXIvdjJyYXktcnVsZXMtZGF0L3JlbGVhc2VzL2xhdGVzdC9kb3dubG9hZC9nZW9pcC5kYXQiLCJHZW9zaXRlVXJsIjoiaHR0cHM6Ly9naXRodWIuY29tL0xveWFsc29sZGllci92MnJheS1ydWxlcy1kYXQvcmVsZWFzZXMvbGF0ZXN0L2Rvd25sb2FkL2dlb3NpdGUuZGF0IiwiRmFrZURucyI6ZmFsc2UsIlVzZUNodW5rRmlsZXMiOnRydWUsIkxhc3RVcGRhdGVkIjowfQ=="
+
+
+def append_singbox(url: str) -> str:
+    """Добавить /sing-box к URL подписки, если ещё не добавлен."""
+    if url and not url.endswith("/sing-box"):
+        return f"{url.rstrip('/')}/sing-box"
+    return url
 
 
 def format_bytes(bytes_value: int) -> str:
@@ -59,6 +66,9 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, s
     if isinstance(message, types.CallbackQuery):
         message = message.message
 
+    # Добавляем /sing-box к подписке для автоматического импорта в Hiddify/sing-box клиенты
+    subscription_url = append_singbox(subscription_url)
+
     is_premium = False
     if user:
         if hasattr(user, "tier") and getattr(user, "tier") == "premium":
@@ -85,16 +95,17 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, s
     if is_premium:
         premium_note = (
             "💎 <b>Настройка маршрутизации (VIP):</b>\n\n"
-            "Мы специально не встраиваем обход блокировок в основной ключ, чтобы максимально скрыть работу VPN. "
-            "Для корректной работы российских сервисов напрямую, а заблокированных через VPN, "
-            "примените ключ маршрутизации в приложении Happ:\n\n"
-            "🔑 <b>Ключ маршрутизации Happ:</b>\n"
-            f"<code>{ROUTE_HAPP}</code>\n"
+            "Российские сайты будут работать напрямую от вашего провайдера, "
+            "а заблокированные — через VPN. Нажмите кнопку ниже, чтобы применить ключ маршрутизации:\n\n"
             f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>\n\n"
             "На уровне нашего сервера для вас включен жесткий БЛОК на посещение RU-сервисов через VPN, "
             "поэтому они будут работать только напрямую — это делает ваш серфинг невидимым для проверок!"
         )
         success_text += premium_note
+        # Inline-кнопка для автоматического импорта routing в Happ
+        routing_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔑 Импортировать маршрутизацию в Happ", url=ROUTE_HAPP)]
+        ])
     else:
         success_text += "⚠️ Не передавайте ссылку третьим лицам! Если возникнут проблемы с подключением, напишите в поддержку."
 
@@ -104,6 +115,13 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, s
         reply_markup=get_main_menu_keyboard(show_trial=False),
         parse_mode="HTML"
     )
+
+    if is_premium:
+        await message.answer(
+            text="👆 Нажмите кнопку выше, чтобы автоматически применить маршрутизацию в Happ.",
+            reply_markup=routing_keyboard,
+            parse_mode="HTML"
+        )
 
     await message.answer_photo(
         photo=qr_file,
@@ -284,6 +302,7 @@ async def regenerate_key(callback: types.CallbackQuery, session: AsyncSession):
         new_sub_url = new_acc.get("subscription_url", "")
         if new_sub_url and new_sub_url.startswith("/"):
             new_sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{new_sub_url}"
+        new_sub_url = append_singbox(new_sub_url)
 
         await callback.message.edit_text(
             f"🔄 <b>Ключ перегенерирован!</b>\n\n"
@@ -321,6 +340,7 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
         if subscription_url and subscription_url.startswith("/"):
             base_url = settings.MARZBAN_URL.rstrip("/")
             subscription_url = f"{base_url}{subscription_url}"
+        subscription_url = append_singbox(subscription_url)
 
         links = marzban_data.get("links", [])
         vless_link = links[0] if links else ""
@@ -343,9 +363,12 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
             )
             if is_premium:
                 link_text += (
-                    "💎 <b>VIP: Ключ маршрутизации:</b>\n"
-                    f"<code>{ROUTE_HAPP}</code>\n\n"
-                    f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>"
+                    "💎 <b>Настройка маршрутизации (VIP):</b>\n\n"
+                    "Российские сайты будут работать напрямую, а заблокированные — через VPN. "
+                    "Нажмите кнопку ниже, чтобы применить ключ маршрутизации:\n\n"
+                    f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>\n\n"
+                    "На уровне сервера для вас включен БЛОК на посещение RU-сервисов через VPN — "
+                    "они работают только напрямую, что делает ваш серфинг невидимым для проверок!"
                 )
             else:
                 link_text += "⚠️ Не передавайте ссылку третьим лицам!"
@@ -355,6 +378,16 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
                 disable_web_page_preview=True,
                 parse_mode="HTML"
             )
+
+            if is_premium:
+                routing_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔑 Импортировать маршрутизацию в Happ", url=ROUTE_HAPP)]
+                ])
+                await callback.message.answer(
+                    text="👆 Нажмите кнопку выше, чтобы автоматически применить маршрутизацию в Happ.",
+                    reply_markup=routing_keyboard,
+                    parse_mode="HTML"
+                )
 
             # QR
             qr_file = generate_qr(subscription_url or vless_link)
