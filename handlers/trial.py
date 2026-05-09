@@ -17,7 +17,7 @@ from database.models import User
 from keyboards.inline import get_main_menu_keyboard
 from services.marzban_api import marzban_service
 from config import settings, get_db_setting
-from handlers.profile import append_singbox
+
 
 router = Router()
 
@@ -43,7 +43,7 @@ async def send_trial_info(
         message = message.message
 
     # Добавляем /sing-box для автоматического импорта в Happ
-    subscription_url = append_singbox(subscription_url)
+    # subscription_url is plain — Happ auto-loads routing via v2ray-json
 
     qr_file = generate_qr(subscription_url)
 
@@ -131,7 +131,7 @@ async def show_trial(
             if subscription_url and subscription_url.startswith("/"):
                 base_url = settings.MARZBAN_URL.rstrip("/")
                 subscription_url = f"{base_url}{subscription_url}"
-            subscription_url = append_singbox(subscription_url)
+            # subscription_url is plain — Happ auto-loads routing via v2ray-json
 
             if subscription_url:
                 await send_trial_info(message, subscription_url)
@@ -278,7 +278,7 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
         if subscription_url and subscription_url.startswith("/"):
             base_url = settings.MARZBAN_URL.rstrip("/")
             subscription_url = f"{base_url}{subscription_url}"
-        subscription_url = append_singbox(subscription_url)
+        # subscription_url is plain — Happ auto-loads routing via v2ray-json
 
         if not subscription_url:
             await callback.message.answer("❌ Ошибка генерации ссылки сервером.")
