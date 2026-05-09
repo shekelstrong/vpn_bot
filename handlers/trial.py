@@ -2,6 +2,7 @@
 Обработчик пробной подписки (триала).
 Выдача доступа на 24 часа с лимитом 1GB.
 """
+
 import io
 import qrcode
 from aiogram import Router, F, types
@@ -34,7 +35,9 @@ def generate_qr(data: str) -> BufferedInputFile:
     return BufferedInputFile(bio.read(), filename="qr.png")
 
 
-async def send_trial_info(message: types.Message | types.CallbackQuery, subscription_url: str):
+async def send_trial_info(
+    message: types.Message | types.CallbackQuery, subscription_url: str
+):
     """Отправить Умную ссылку для пробной подписки."""
     if isinstance(message, types.CallbackQuery):
         message = message.message
@@ -64,14 +67,16 @@ async def send_trial_info(message: types.Message | types.CallbackQuery, subscrip
     await message.answer_photo(
         photo=qr_file,
         caption=success_text,
-        reply_markup=get_main_menu_keyboard(show_trial=False)
+        reply_markup=get_main_menu_keyboard(show_trial=False),
     )
 
 
 @router.callback_query(F.data == "trial")
 @router.message(Command("trial"))
 @router.message(F.text.startswith("Пробная подписка"))
-async def show_trial(callback_or_message: types.CallbackQuery | types.Message, session: AsyncSession):
+async def show_trial(
+    callback_or_message: types.CallbackQuery | types.Message, session: AsyncSession
+):
     """Показать информацию о пробной подписке (триале)."""
 
     if isinstance(callback_or_message, types.CallbackQuery):
@@ -98,9 +103,8 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
         # У пользователя уже активирован триал - показываем ключ
         if not user.marzban_username:
             await message.answer(
-                "❌ Ошибка: у вас нет VPN-аккаунта.\n\n"
-                "Обратитесь в поддержку.",
-                reply_markup=get_main_menu_keyboard(show_trial=False)
+                "❌ Ошибка: у вас нет VPN-аккаунта.\n\nОбратитесь в поддержку.",
+                reply_markup=get_main_menu_keyboard(show_trial=False),
             )
             return
 
@@ -115,11 +119,13 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
                     tg_id=user_id,
                     username=user.username,
                     expire_hours=int(trial_hours),
-                    data_limit_gb=int(trial_limit)
+                    data_limit_gb=int(trial_limit),
                 )
                 user.marzban_username = marzban_data.get("username")
                 await session.commit()
-                logger.info(f"Пересоздан аккаунт Marzban для пользователя {user_id} с триалом")
+                logger.info(
+                    f"Пересоздан аккаунт Marzban для пользователя {user_id} с триалом"
+                )
 
             subscription_url = marzban_data.get("subscription_url", "")
             if subscription_url and subscription_url.startswith("/"):
@@ -133,14 +139,14 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
                 await message.answer(
                     "❌ Не удалось получить ссылку на подписку.\n\n"
                     "Пожалуйста, обратитесь в поддержку.",
-                    reply_markup=get_main_menu_keyboard(show_trial=False)
+                    reply_markup=get_main_menu_keyboard(show_trial=False),
                 )
         except Exception as e:
             logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
             await message.answer(
                 "❌ Произошла ошибка при получении ссылки.\n\n"
                 "Пожалуйста, попробуйте позже или обратитесь в поддержку.",
-                reply_markup=get_main_menu_keyboard(show_trial=False)
+                reply_markup=get_main_menu_keyboard(show_trial=False),
             )
 
     elif has_subscription and not user.is_trial_used:
@@ -160,15 +166,27 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
         )
         await message.answer(
             text=text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Активировать триал", callback_data="activate_trial")],
-                [InlineKeyboardButton(text="↩️ Назад", callback_data="back_to_main")]
-            ])
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="✅ Активировать триал", callback_data="activate_trial"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="↩️ Назад", callback_data="back_to_main"
+                        )
+                    ],
+                ]
+            ),
         )
 
     elif user.is_trial_used:
         # Триал уже использован, подписки нет
-        price = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
+        price = await get_db_setting(
+            session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB)
+        )
         text = (
             "📦 <b>Пробная подписка</b>\n\n"
             "❌ Вы уже использовали пробный период.\n\n"
@@ -177,8 +195,7 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
             f"💳 <b>Стоимость:</b> {price}₽/месяц"
         )
         await message.answer(
-            text=text,
-            reply_markup=get_main_menu_keyboard(show_trial=False)
+            text=text, reply_markup=get_main_menu_keyboard(show_trial=False)
         )
 
     else:
@@ -198,10 +215,20 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
         )
         await message.answer(
             text=text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Активировать триал", callback_data="activate_trial")],
-                [InlineKeyboardButton(text="↩️ Назад", callback_data="back_to_main")]
-            ])
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="✅ Активировать триал", callback_data="activate_trial"
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="↩️ Назад", callback_data="back_to_main"
+                        )
+                    ],
+                ]
+            ),
         )
 
 
@@ -227,8 +254,7 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
 
     if user.expire_date and user.expire_date > datetime.utcnow():
         await callback.message.answer(
-            "❌ У вас уже есть активная подписка.\n\n"
-            "Сначала дождитесь её окончания."
+            "❌ У вас уже есть активная подписка.\n\nСначала дождитесь её окончания."
         )
         return
 
@@ -240,7 +266,7 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
             tg_id=user_id,
             username=user.username,
             expire_hours=int(trial_hours),
-            data_limit_gb=int(trial_limit)
+            data_limit_gb=int(trial_limit),
         )
 
         user.marzban_username = marzban_data.get("username")
