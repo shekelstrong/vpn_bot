@@ -2,10 +2,10 @@
 Обработчик раздела помощи.
 
 ИЗМЕНЕНИЯ:
-1. Все упоминания V2Box/Happ заменены на Hiddify
-2. Кнопка «Как настроить Hiddify»
-3. Ссылки на скачивание Hiddify для всех платформ
-4. Убраны ключи маршрутизации
+1. Все упоминания V2Box заменены на Happ
+2. Кнопка «Как настроить V2Box» → «Как настроить Happ»
+3. Ссылки на скачивание Happ для всех платформ
+4. Убран ключ маршрутизации V2Box, оставлен только Happ
 """
 
 from aiogram import Router, F, types
@@ -14,7 +14,7 @@ from loguru import logger
 
 from keyboards.inline import (
     get_help_keyboard,
-    get_hiddify_instruction_keyboard,
+    get_happ_instruction_keyboard,
     get_main_menu_keyboard,
 )
 from config import settings
@@ -36,7 +36,7 @@ async def show_help(callback_or_message: types.CallbackQuery | types.Message):
     help_text = (
         "🆘 <b>Центр помощи Nemo VPN</b>\n\n"
         "Выберите тему, которая вас интересует:\n\n"
-        "📱 <b>Как настроить Hiddify</b>\n"
+        "📱 <b>Как настроить Happ</b>\n"
         "Пошаговая инструкция по настройке приложения\n\n"
         "❓ <b>Частые вопросы</b>\n"
         "Ответы на популярные вопросы\n\n"
@@ -50,17 +50,17 @@ async def show_help(callback_or_message: types.CallbackQuery | types.Message):
     )
 
 
-@router.callback_query(F.data == "help_hiddify")
-async def help_hiddify(callback: types.CallbackQuery):
-    """Инструкция по настройке Hiddify."""
+@router.callback_query(F.data == "help_happ")
+async def help_happ(callback: types.CallbackQuery):
+    """Инструкция по настройке Happ (заменяет V2Box)."""
     instruction_text = (
-        "📱 <b>Настройка Hiddify для Nemo VPN</b>\n\n"
+        "📱 <b>Настройка Happ для Nemo VPN</b>\n\n"
         "<b>Шаг 1: Скачайте приложение</b>\n"
         "Нажмите кнопку ниже для вашей платформы.\n\n"
         "<b>Шаг 2: Получите ссылку</b>\n"
         "В разделе «Мой профиль» нажмите «Получить ссылку 🔗» и скопируйте её.\n\n"
         "<b>Шаг 3: Добавьте профиль VPN</b>\n"
-        "1. Откройте приложение Hiddify\n"
+        "1. Откройте приложение Happ\n"
         "2. Нажмите <b>«+»</b> для добавления нового профиля\n"
         "3. Выберите <b>«Import from Clipboard»</b>\n"
         "4. Ссылка автоматически добавится\n\n"
@@ -69,8 +69,8 @@ async def help_hiddify(callback: types.CallbackQuery):
         "2. Нажмите кнопку подключения\n"
         "3. Готово! VPN активен 🎉\n\n"
         "🌟 <b>Для пользователей тарифа VIP (Обход списков):</b>\n"
-        "После покупки VIP-тарифа вам также будет доступна умная маршрутизация.\n"
-        "Она настраивает умную маршрутизацию: российские сервисы "
+        "После покупки VIP-тарифа вам также придёт ключ маршрутизации.\n"
+        "Он настраивает умную маршрутизацию: российские сервисы "
         "(Сбер, Госуслуги, Wildberries) работают напрямую от вашего провайдера, "
         "а заблокированные (Instagram, X, ChatGPT) — через VPN.\n\n"
         "Это делает ваш серфинг невидимым для РКН! 🔒"
@@ -78,7 +78,7 @@ async def help_hiddify(callback: types.CallbackQuery):
     
     await callback.message.answer(
         text=instruction_text,
-        reply_markup=get_hiddify_instruction_keyboard(),
+        reply_markup=get_happ_instruction_keyboard(),
     )
     
     await callback.answer()

@@ -45,13 +45,13 @@ async def send_trial_info(message: types.Message | types.CallbackQuery, subscrip
         "🔗 <b>Ваша ссылка на подписку:</b>\n"
         f"<code>{subscription_url}</code>\n"
         "<i>(Нажмите на ссылку, чтобы скопировать)</i>\n\n"
-        "📱 <b>Инструкция по подключению (Hiddify):</b>\n"
-        "1. Установите <b>Hiddify</b> (<a href='https://apps.apple.com/us/app/hiddify-proxy/id6444588589'>iOS</a> / <a href='https://play.google.com/store/apps/details?id=app.hiddify.com'>Android</a>)\n"
+        "📱 <b>Инструкция по подключению (Happ):</b>\n"
+        "1. Установите <b>Happ</b> (<a href='https://apps.apple.com/us/app/happ-proxy-utility/id6504287215'>iOS</a> / <a href='https://play.google.com/store/apps/details?id=com.happproxy'>Android</a>)\n"
         "2. В приложении перейдите \n"
         "3. Нажмите <b>«+»</b> → <b>«Import from Clipboard»</b>.\n"
         "4. На главной (Home) нажмите <b>кнопку подключения</b>.\n\n"
         "📷 <b>Альтернативный способ (QR-код):</b>\n"
-        "Вы можете отсканировать QR-код из этого сообщения через приложение Hiddify на вашем устройстве.\n\n"
+        "Вы можете отсканировать QR-код из этого сообщения через приложение Happ на вашем устройстве.\n\n"
         "⏰ <b>Ваш триал действует 24 часа!</b>\n\n"
         "⚠️ Не передавайте ссылку третьим лицам!\n\n"
         "Если возникнут проблемы с подключением, напишите в поддержку по кнопке «Помощь 🆘» из главного меню."
@@ -121,8 +121,6 @@ async def show_trial(callback_or_message: types.CallbackQuery | types.Message, s
             if subscription_url and subscription_url.startswith("/"):
                 base_url = settings.MARZBAN_URL.rstrip("/")
                 subscription_url = f"{base_url}{subscription_url}"
-            if subscription_url and not subscription_url.endswith("/sing-box"):
-                subscription_url = f"{subscription_url.rstrip('/')}/sing-box"
 
             if subscription_url:
                 await send_trial_info(message, subscription_url)
@@ -249,8 +247,6 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
         if subscription_url and subscription_url.startswith("/"):
             base_url = settings.MARZBAN_URL.rstrip("/")
             subscription_url = f"{base_url}{subscription_url}"
-        if subscription_url and not subscription_url.endswith("/sing-box"):
-            subscription_url = f"{subscription_url.rstrip('/')}/sing-box"
 
         if not subscription_url:
             await callback.message.answer("❌ Ошибка генерации ссылки сервером.")

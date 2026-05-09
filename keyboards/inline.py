@@ -2,9 +2,9 @@
 Модуль inline-клавиатур для бота Nemo VPN.
 
 ИЗМЕНЕНИЯ:
-1. Все упоминания V2Box/Happ заменены на Hiddify
-2. Кнопка «Как настроить Hiddify 📱»
-3. Ссылки на скачивание Hiddify для всех платформ (iOS, Android, Windows, macOS, Linux)
+1. Все упоминания V2Box убраны, заменены на Happ
+2. Кнопка «Как настроить V2Box» → «Как настроить Happ 📱»
+3. Ссылки на скачивание Happ для всех платформ (iOS, Android, Windows, macOS, Linux)
 """
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -73,7 +73,7 @@ def get_trial_keyboard() -> InlineKeyboardMarkup:
 
 def get_help_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Как настроить Hiddify 📱", callback_data="help_hiddify", style="primary")
+    builder.button(text="Как настроить Happ 📱", callback_data="help_happ", style="primary")
     builder.button(text="Частые вопросы ❓", callback_data="help_faq", style="primary")
     builder.button(text="Реферальная программа 👥", callback_data="referral", style="primary")
     builder.button(text="Техподдержка 💬", callback_data="help_support", style="primary")
@@ -84,14 +84,14 @@ def get_help_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def get_hiddify_instruction_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура с ссылками на скачивание Hiddify для всех платформ."""
+def get_happ_instruction_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура с ссылками на скачивание Happ для всех платформ."""
     builder = InlineKeyboardBuilder()
-    builder.button(text="📱 iOS (App Store)", url="https://apps.apple.com/us/app/hiddify-proxy/id6444588589", style="primary")
-    builder.button(text="🤖 Android (Google Play)", url="https://play.google.com/store/apps/details?id=app.hiddify.com", style="primary")
-    builder.button(text="🖥 Windows", url="https://github.com/hiddify/hiddify-app/releases/latest", style="primary")
-    builder.button(text="🍎 macOS", url="https://apps.apple.com/us/app/hiddify-proxy/id6444588589", style="primary")
-    builder.button(text="🐧 Linux", url="https://github.com/hiddify/hiddify-app/releases/latest", style="primary")
+    builder.button(text="📱 iOS (App Store)", url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215", style="primary")
+    builder.button(text="🤖 Android (Google Play)", url="https://play.google.com/store/apps/details?id=com.happproxy", style="primary")
+    builder.button(text="🖥 Windows", url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe", style="primary")
+    builder.button(text="🍎 macOS", url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215", style="primary")
+    builder.button(text="🐧 Linux", url="https://github.com/Happ-proxy/happ-desktop/releases/latest", style="primary")
     builder.button(text="Назад ↩️", callback_data="help", style="danger")
     builder.adjust(1)
     return builder.as_markup()

@@ -209,8 +209,6 @@ async def notify_user_purchase(
                 if subscription_url and subscription_url.startswith("/"):
                     base_url = settings.MARZBAN_URL.rstrip("/")
                     subscription_url = f"{base_url}{subscription_url}"
-                if subscription_url and not subscription_url.endswith("/sing-box"):
-                    subscription_url = f"{subscription_url.rstrip('/')}/sing-box"
         except Exception as e:
             logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
     
@@ -231,11 +229,11 @@ async def notify_user_purchase(
     instruction_base += (
         "📱 <b>Инструкция по подключению:</b>\n"
         "1. Установите приложение для вашего устройства:\n"
-        "• <b>iOS / macOS:</b> <a href='https://apps.apple.com/us/app/hiddify-proxy/id6444588589'>Hiddify в App Store</a>\n"
-        "• <b>Android:</b> <a href='https://play.google.com/store/apps/details?id=app.hiddify.com'>Hiddify в Google Play</a>\n"
-        "• <b>Windows:</b> <a href='https://github.com/hiddify/hiddify-app/releases/latest'>Скачать с GitHub</a>\n"
+        "• <b>iOS / macOS:</b> <a href='https://apps.apple.com/us/app/happ-proxy-utility/id6504287215'>Happ</a>\n"
+        "• <b>Android:</b> <a href='https://play.google.com/store/apps/details?id=com.happproxy'>Happ</a>\n"
+        "• <b>Windows:</b> <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe'>Happ</a>\n"
         "2. Скопируйте ссылку на подписку (выше).\n"
-        "3. Откройте Hiddify, нажмите <b>«+»</b> и выберите <b>«Import from Clipboard»</b>.\n"
+        "3. Откройте приложение, нажмите <b>«+»</b> и выберите <b>«Import from Clipboard»</b>.\n"
         "4. Нажмите кнопку подключения на главном экране.\n\n"
     )
 
@@ -245,8 +243,13 @@ async def notify_user_purchase(
             "🚀 <b>Настройка умной маршрутизации (VIP):</b>\n\n"
             "Мы специально не встраиваем обход блокировок в основной ключ, чтобы максимально скрыть работу VPN от систем РКН. "
             "Для корректной работы российских сервисов напрямую, а заблокированных через VPN, "
-            "примените маршрутизацию в приложении Hiddify:\n\n"
-            f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>\n\n"
+            "примените ключ маршрутизации для вашего приложения:\n\n"
+            "🔑 <b>Для Happ (все платформы):</b>\n"
+            "<code>happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0=</code>\n"
+            f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/51'><b>Видео-инструкция для Happ</b></a>\n\n"
+            "🔑 <b>Для Happ (Android / Windows / Apple):</b>\n"
+            "<code>happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0=</code>\n"
+            f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция для Happ</b></a>\n\n"
             "На уровне нашего сервера для вас включен жесткий БЛОК на посещение РУ-сервисов через VPN, "
             "поэтому они будут работать только напрямую с вашего провайдера — это делает ваш серфинг невидимым для проверок!"
         )

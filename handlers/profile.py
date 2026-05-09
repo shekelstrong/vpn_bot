@@ -2,14 +2,15 @@
 Обработчик профиля пользователя.
 
 ИЗМЕНЕНИЯ:
-1. Все упоминания V2Box/Happ заменены на Hiddify
-2. Ссылки на скачивание Hiddify для всех платформ
-3. Убраны ключи маршрутизации (ROUTE_HAPP)
+1. Все упоминания V2Box убраны, заменены на Happ
+2. Добавлены ссылки на Happ для всех платформ (iOS, Android, Windows, macOS, Linux)
+3. Убран ключ маршрутизации V2Box, оставлен только Happ
 4. Добавлена кнопка перегенерации ключа (regenerate_key)
-5. Добавлен /sing-box к URL подписок
+5. Перегенерация: старая ссылка перестаёт работать, срок и ГБ сохраняются
 """
 
 import io
+import os
 import qrcode
 from aiogram import Router, F, types
 from aiogram.filters import Command
@@ -24,6 +25,9 @@ from services.marzban_api import marzban_service
 from config import settings, get_db_setting
 
 router = Router()
+
+# Ключ маршрутизации Happ (обход белых списков)
+ROUTE_HAPP = "happ://routing/add/eyJEbnNIb3N0cyI6e30sIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiQmxvY2tTaXRlcyI6W10sIkxhc3RVcGRhdGVkIjoxNzc1OTYwOTM0LCJEb21lc3RpY0ROU0RvbWFpbiI6Imh0dHBzOlwvXC9kbnMuZ29vZ2xlXC9kbnMtcXVlcnkiLCJEb21lc3RpY0ROU1R5cGUiOiJEb1UiLCJVc2VDaHVua0ZpbGVzIjp0cnVlLCJSb3V0ZU9yZGVyIjoiYmxvY2stZGlyZWN0LXByb3h5IiwiUmVtb3RlRE5TVHlwZSI6IkRvVSIsIk5hbWUiOiLQoNCkIiwiR2xvYmFsUHJveHkiOnRydWUsIlJlbW90ZUROU0lwIjoiMS4xLjEuMSIsIkdlb2lwVXJsIjoiaHR0cHM6XC9cL2dpdGh1Yi5jb21cL0xveWFsc29sZGllclwvdjJyYXktcnVsZXMtZGF0XC9yZWxlYXNlc1wvbGF0ZXN0XC9kb3dubG9hZFwvZ2VvaXAuZGF0IiwiRmFrZURucyI6ZmFsc2UsIkRpcmVjdFNpdGVzIjpbImdlb3NpdGU6Y2F0ZWdvcnktcnUiXSwiQmxvY2tJcCI6W10sIkRpcmVjdElwIjpbIjEwLjAuMC4wXC84IiwiMTcyLjE2LjAuMFwvMTIiLCIxOTIuMTY4LjAuMFwvMTYiLCIxNjkuMjU0LjAuMFwvMTYiLCIyMjQuMC4wLjBcLzQiLCIyNTUuMjU1LjI1NS4yNTUiLCJnZW9pcDpydSJdLCJEb21lc3RpY0ROU0lwIjoiOC44LjguOCIsIlJlbW90ZUROU0RvbWFpbiI6Imh0dHBzOlwvXC9jbG91ZGZsYXJlLWRucy5jb21cL2Rucy1xdWVyeSIsIlByb3h5SXAiOltdLCJQcm94eVNpdGVzIjpbXSwiR2Vvc2l0ZVVybCI6Imh0dHBzOlwvXC9naXRodWIuY29tXC9Mb3lhbHNvbGRpZXJcL3YycmF5LXJ1bGVzLWRhdFwvcmVsZWFzZXNcL2xhdGVzdFwvZG93bmxvYWRcL2dlb3NpdGUuZGF0In0="
 
 
 def format_bytes(bytes_value: int) -> str:
@@ -50,13 +54,6 @@ def generate_qr(data: str) -> BufferedInputFile:
     return BufferedInputFile(bio.read(), filename="qr.png")
 
 
-def append_sing_box(url: str) -> str:
-    """Добавить /sing-box к URL подписки, если ещё не добавлен."""
-    if url and not url.endswith("/sing-box"):
-        return f"{url.rstrip('/')}/sing-box"
-    return url
-
-
 async def send_subscription_info(message: types.Message | types.CallbackQuery, subscription_url: str, vless_link: str = "", user=None):
     """Отправить ссылку для платной подписки."""
     if isinstance(message, types.CallbackQuery):
@@ -67,9 +64,6 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, s
         if hasattr(user, "tier") and getattr(user, "tier") == "premium":
             is_premium = True
 
-    # Добавляем /sing-box к подписке
-    subscription_url = append_sing_box(subscription_url)
-
     qr_file = generate_qr(subscription_url or vless_link)
 
     success_text = (
@@ -78,13 +72,13 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, s
         f"<code>{subscription_url}</code>\n"
         f"<i>(Нажмите на ссылку, чтобы скопировать)</i>\n\n"
         f"📱 <b>Инструкция по подключению:</b>\n"
-        f"1. Установите приложение <b>Hiddify</b> для вашего устройства:\n"
-        f"• <b>iOS / macOS:</b> <a href='https://apps.apple.com/us/app/hiddify-proxy/id6444588589'>App Store</a>\n"
-        f"• <b>Android:</b> <a href='https://play.google.com/store/apps/details?id=app.hiddify.com'>Google Play</a>\n"
-        f"• <b>Windows:</b> <a href='https://github.com/hiddify/hiddify-app/releases/latest'>Скачать</a>\n"
-        f"• <b>Linux:</b> <a href='https://github.com/hiddify/hiddify-app/releases/latest'>GitHub Releases</a>\n"
+        f"1. Установите приложение <b>Happ</b> для вашего устройства:\n"
+        f"• <b>iOS / macOS:</b> <a href='https://apps.apple.com/us/app/happ-proxy-utility/id6504287215'>App Store</a>\n"
+        f"• <b>Android:</b> <a href='https://play.google.com/store/apps/details?id=com.happproxy'>Google Play</a>\n"
+        f"• <b>Windows:</b> <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe'>Скачать</a>\n"
+        f"• <b>Linux:</b> <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest'>GitHub Releases</a>\n"
         f"2. Скопируйте ссылку на подписку (выше).\n"
-        f"3. Откройте Hiddify, нажмите <b>«+»</b> и выберите <b>«Import from Clipboard»</b>.\n"
+        f"3. Откройте Happ, нажмите <b>«+»</b> и выберите <b>«Import from Clipboard»</b>.\n"
         f"4. Нажмите кнопку подключения на главном экране.\n\n"
     )
 
@@ -93,7 +87,9 @@ async def send_subscription_info(message: types.Message | types.CallbackQuery, s
             "💎 <b>Настройка маршрутизации (VIP):</b>\n\n"
             "Мы специально не встраиваем обход блокировок в основной ключ, чтобы максимально скрыть работу VPN. "
             "Для корректной работы российских сервисов напрямую, а заблокированных через VPN, "
-            "примените маршрутизацию в приложении Hiddify:\n\n"
+            "примените ключ маршрутизации в приложении Happ:\n\n"
+            "🔑 <b>Ключ маршрутизации Happ:</b>\n"
+            f"<code>{ROUTE_HAPP}</code>\n"
             f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>\n\n"
             "На уровне нашего сервера для вас включен жесткий БЛОК на посещение RU-сервисов через VPN, "
             "поэтому они будут работать только напрямую — это делает ваш серфинг невидимым для проверок!"
@@ -218,7 +214,7 @@ async def confirm_regenerate(callback: types.CallbackQuery, session: AsyncSessio
     await callback.message.edit_text(
         "⚠️ <b>Перегенерация ключа</b>\n\n"
         "Старая ссылка перестанет работать.\n"
-        "Вам придётся обновить подписку в Hiddify.\n\n"
+        "Вам придётся обновить подписку в Happ.\n\n"
         "Срок подписки и ГБ сохраняются.\n\n"
         "<b>Вы уверены?</b>",
         reply_markup=builder.as_markup(),
@@ -288,14 +284,13 @@ async def regenerate_key(callback: types.CallbackQuery, session: AsyncSession):
         new_sub_url = new_acc.get("subscription_url", "")
         if new_sub_url and new_sub_url.startswith("/"):
             new_sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{new_sub_url}"
-        new_sub_url = append_sing_box(new_sub_url)
 
         await callback.message.edit_text(
             f"🔄 <b>Ключ перегенерирован!</b>\n\n"
             f"Старая ссылка больше не работает.\n\n"
             f"🔗 <b>Новый ключ подписки:</b>\n"
             f"<code>{new_sub_url}</code>\n\n"
-            f"Обновите подписку в Hiddify — старый ключ исчезнет автоматически.\n"
+            f"Обновите подписку в Happ — старый ключ исчезнет автоматически.\n"
             f"Срок подписки и лимит ГБ сохранены.",
             parse_mode="HTML"
         )
@@ -326,7 +321,6 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
         if subscription_url and subscription_url.startswith("/"):
             base_url = settings.MARZBAN_URL.rstrip("/")
             subscription_url = f"{base_url}{subscription_url}"
-        subscription_url = append_sing_box(subscription_url)
 
         links = marzban_data.get("links", [])
         vless_link = links[0] if links else ""
@@ -338,18 +332,19 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
                 f"🔗 <b>Ваша ссылка на подписку:</b>\n"
                 f"<code>{subscription_url}</code>\n\n"
                 f"📱 <b>Инструкция по подключению:</b>\n"
-                f"1. Установите <b>Hiddify</b>:\n"
-                f"• <a href='https://apps.apple.com/us/app/hiddify-proxy/id6444588589'>iOS / macOS</a>\n"
-                f"• <a href='https://play.google.com/store/apps/details?id=app.hiddify.com'>Android</a>\n"
-                f"• <a href='https://github.com/hiddify/hiddify-app/releases/latest'>Windows</a>\n"
-                f"• <a href='https://github.com/hiddify/hiddify-app/releases/latest'>Linux</a>\n"
+                f"1. Установите <b>Happ</b>:\n"
+                f"• <a href='https://apps.apple.com/us/app/happ-proxy-utility/id6504287215'>iOS / macOS</a>\n"
+                f"• <a href='https://play.google.com/store/apps/details?id=com.happproxy'>Android</a>\n"
+                f"• <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe'>Windows</a>\n"
+                f"• <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest'>Linux</a>\n"
                 f"2. Скопируйте ссылку выше.\n"
-                f"3. Откройте Hiddify → «+» → <b>Import from Clipboard</b>.\n"
+                f"3. Откройте Happ → «+» → <b>Import from Clipboard</b>.\n"
                 f"4. Выберите сервер и подключитесь!\n\n"
             )
             if is_premium:
                 link_text += (
-                    f"💎 <b>VIP: Маршрутизация:</b>\n"
+                    "💎 <b>VIP: Ключ маршрутизации:</b>\n"
+                    f"<code>{ROUTE_HAPP}</code>\n\n"
                     f"📽 <a href='https://t.me/{settings.CHANNEL_USERNAME.lstrip('@')}/56'><b>Видео-инструкция</b></a>"
                 )
             else:
@@ -425,7 +420,6 @@ async def show_subscription(callback_or_message, session: AsyncSession):
             subscription_url = marzban_data.get("subscription_url", "")
             if subscription_url and subscription_url.startswith("/"):
                 subscription_url = f"{settings.MARZBAN_URL.rstrip('/')}{subscription_url}"
-            subscription_url = append_sing_box(subscription_url)
 
             links = marzban_data.get("links", [])
             vless_link = links[0] if links else ""
