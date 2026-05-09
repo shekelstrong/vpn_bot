@@ -22,6 +22,10 @@ from database.models import User
 from keyboards.inline import get_profile_keyboard, get_main_menu_keyboard
 from services.marzban_api import marzban_service
 from config import settings, get_db_setting
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+# Deeplink для маршрутизации Happ — не создаётся автоматически из подписки
+ROUTE_HAPP = "happ://routing/add/eyJOYW1lIjoiTkVNTyBWUE4iLCJSZW1vdGVETlNUeXBlIjoiRG9IIiwiUmVtb3RlRE5TRG9tYWluIjoiaHR0cHM6Ly8xLjEuMS4yL2Rucy1xdWVyeSIsIkRvbWVzdGljRE5TVHlwZSI6IkRvSCIsIkRvbWVzdGljRE5TRG9tYWluIjoiaHR0cHM6Ly83Ny44OC44LjgvZG5zLXF1ZXJ5IiwiRG9tZXN0aWNETlNJcCI6Ijc3Ljg4LjguOCIsIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiUm91dGVPcmRlciI6ImJsb2NrLXByb3h5LWRpcmVjdCIsIkdsb2JhbFByb3h5Ijp0cnVlLCJGYWtlRG5zIjpmYWxzZSwiRGlyZWN0SXAiOlsiMTAuMC4wLjAvOCIsIjEwMC42NC4wLjAvMTAiLCIxNzIuMTYuMC4wLzEyIiwiMTkyLjE2OC4wLjAvMTYiLCIxNjkuMjU0LjAuMC8xNiIsIjIyNC4wLjAuMC80IiwiMjU1LjI1NS4yNTUuMjU1Il0sIkRuc0hvc3RzIjp7ImxrbnBkLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE4MSIsImxrZmwyLm5hbG9nLnJ1IjoiMjEzLjI0LjY0Ljc1In0sIkdlb3NpdGVVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9zaXRlL2dlb3NpdGUtY2F0ZWdvcnktcnUuc3JzIiwiR2VvaXBVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9pcC9nZW9pcC1ydS5zcnMiLCJCbG9ja1NpdGVzIjpbXSwiUHJveHlTaXRlcyI6W119"
 
 router = Router()
 
@@ -79,15 +83,38 @@ async def send_subscription_info(
         f"4. Нажмите кнопку подключения на главном экране.\n\n"
     )
 
-    success_text += "🔄 <b>Маршрутизация российской трафика подключается автоматически</b> при добавлении подписки в Happ.\n\n"
-    success_text += "⚠️ Не передавайте ссылку третьим лицам! Если возникнут проблемы с подключением, напишите в поддержку."
+    # Маршрутизация: для всех — автопримечание, для premium — кнопка
+    is_premium = False
+    if user and hasattr(user, "tier") and user.tier == "premium":
+        is_premium = True
+    if user and hasattr(user, "expire_premium") and user.expire_premium:
+        from datetime import datetime as _dt
+        if user.expire_premium > _dt.utcnow():
+            is_premium = True
 
-    await message.answer(
-        text=success_text,
-        disable_web_page_preview=True,
-        reply_markup=get_main_menu_keyboard(show_trial=False),
-        parse_mode="HTML",
-    )
+    if is_premium:
+        success_text += "Для корректной работы российских сервисов напрямую, нажмите кнопку:\n\n"
+        success_text += "⚠️ Не передавайте ссылку третьим лицам!"
+
+        route_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP)]
+        ])
+        await message.answer(
+            text=success_text,
+            disable_web_page_preview=True,
+            reply_markup=route_keyboard,
+            parse_mode="HTML",
+        )
+    else:
+        success_text += "🔄 <b>Маршрутизация российской трафика подключается автоматически</b> при добавлении подписки в Happ.\n\n"
+        success_text += "⚠️ Не передавайте ссылку третьим лицам! Если возникнут проблемы с подключением, напишите в поддержку."
+
+        await message.answer(
+            text=success_text,
+            disable_web_page_preview=True,
+            reply_markup=get_main_menu_keyboard(show_trial=False),
+            parse_mode="HTML",
+        )
 
     await message.answer_photo(photo=qr_file, caption="Ваш QR-код для подключения 👆")
 
@@ -322,12 +349,33 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
                 f"3. Откройте Happ → «+» → <b>Import from Clipboard</b>.\n"
                 f"4. Выберите сервер и подключитесь!\n\n"
             )
-            link_text += "\n💡 Маршрутизация российской трафика подключается автоматически при добавлении подписки в Happ."
-            link_text += "\n\n⚠️ Не передавайте ссылку третьим лицам!"
+            # Проверяем, является ли пользователь premium
+            is_premium_user = False
+            if user and hasattr(user, "tier") and user.tier == "premium":
+                is_premium_user = True
+            if user and hasattr(user, "expire_premium") and user.expire_premium:
+                from datetime import datetime as _dt
+                if user.expire_premium > _dt.utcnow():
+                    is_premium_user = True
 
-            await callback.message.answer(
-                text=link_text, disable_web_page_preview=True, parse_mode="HTML"
-            )
+            if is_premium_user:
+                link_text += "\nДля корректной работы российских сервисов напрямую, нажмите кнопку:"
+                link_text += "\n\n⚠️ Не передавайте ссылку третьим лицам!"
+
+                route_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP)]
+                ])
+                await callback.message.answer(
+                    text=link_text, disable_web_page_preview=True, parse_mode="HTML",
+                    reply_markup=route_keyboard,
+                )
+            else:
+                link_text += "\n💡 Маршрутизация российской трафика подключается автоматически при добавлении подписки в Happ."
+                link_text += "\n\n⚠️ Не передавайте ссылку третьим лицам!"
+
+                await callback.message.answer(
+                    text=link_text, disable_web_page_preview=True, parse_mode="HTML"
+                )
 
             # QR
             qr_file = generate_qr(subscription_url or vless_link)

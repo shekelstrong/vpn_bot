@@ -14,6 +14,9 @@ from typing import List, Dict, Optional
 from loguru import logger
 from config import settings
 
+# Deeplink для маршрутизации Happ — не создаётся автоматически из подписки
+ROUTE_HAPP = "happ://routing/add/eyJOYW1lIjoiTkVNTyBWUE4iLCJSZW1vdGVETlNUeXBlIjoiRG9IIiwiUmVtb3RlRE5TRG9tYWluIjoiaHR0cHM6Ly8xLjEuMS4yL2Rucy1xdWVyeSIsIkRvbWVzdGljRE5TVHlwZSI6IkRvSCIsIkRvbWVzdGljRE5TRG9tYWluIjoiaHR0cHM6Ly83Ny44OC44LjgvZG5zLXF1ZXJ5IiwiRG9tZXN0aWNETlNJcCI6Ijc3Ljg4LjguOCIsIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiUm91dGVPcmRlciI6ImJsb2NrLXByb3h5LWRpcmVjdCIsIkdsb2JhbFByb3h5Ijp0cnVlLCJGYWtlRG5zIjpmYWxzZSwiRGlyZWN0SVAiOlsiMTAuMC4wLjAvOCIsIjEwMC42NC4wLjAvMTAiLCIxNzIuMTYuMC4wLzEyIiwiMTkyLjE2OC4wLjAvMTYiLCIxNjkuMjU0LjAuMC8xNiIsIjIyNC4wLjAuMC80IiwiMjU1LjI1NS4yNTUuMjU1Il0sIkRuc0hvc3RzIjp7ImxrbnBkLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE4MSIsImxrZmwyLm5hbG9nLnJ1IjoiMjEzLjI0LjY0Ljc1In0sIkdlb3NpdGVVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9zaXRlL2dlb3NpdGUtY2F0ZWdvcnktcnUuc3JzIiwiR2VvaXBVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9pcC9nZW9pcC1ydS5zcnMiLCJCbG9ja1NpdGVzIjpbXSwiUHJveHlTaXRlcyI6W119"
+
 
 def get_user_link(user_id: int, username: Optional[str] = None) -> str:
     """Формирует кликабельную ссылку на пользователя (только для админов)"""
@@ -266,18 +269,27 @@ async def notify_user_purchase(
     )
 
     if tier == "premium":
-        # Маршрутизация теперь подключается автоматически
+        # Premium: добавляем кнопку маршрутизации
         final_message = (
             instruction_base
-            + "🔄 <b>Маршрутизация российской трафика подключается автоматически</b> при добавлении подписки в Happ.\n\nПриятного пользования Nemo VPN! 🌊"
+            + "Для корректной работы российских сервисов напрямую, нажмите кнопку:\n\n"
+            + "Приятного пользования Nemo VPN! 🌊"
         )
     else:
         final_message = instruction_base + "Приятного пользования Nemo VPN! 🌊"
 
+    # Если premium — добавляем inline-кнопку маршрутизации Happ
+    route_kb = None
+    if tier == "premium":
+        route_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP)]
+        ])
+
     try:
         # 1. Отправляем основное текстовое сообщение (disable_web_page_preview=True, чтобы не было гигантских превью от ссылок)
         await bot.send_message(
-            user_id, final_message, parse_mode="HTML", disable_web_page_preview=True
+            user_id, final_message, parse_mode="HTML", disable_web_page_preview=True,
+            reply_markup=route_kb if route_kb else None,
         )
 
         # 2. Если удалось получить ссылку, генерируем и отправляем QR-код отдельно

@@ -12,6 +12,7 @@
 
 import asyncio
 from aiohttp import web
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
@@ -31,6 +32,9 @@ from handlers.admin.notifications import notify_admin_payment, notify_referrer_p
 
 # Канал Nemo VPN
 CHANNEL_USERNAME = settings.CHANNEL_USERNAME
+
+# Deeplink для маршрутизации Happ — не создаётся автоматически из подписки
+ROUTE_HAPP = "happ://routing/add/eyJOYW1lIjoiTkVNTyBWUE4iLCJSZW1vdGVETlNUeXBlIjoiRG9IIiwiUmVtb3RlRE5TRG9tYWluIjoiaHR0cHM6Ly8xLjEuMS4yL2Rucy1xdWVyeSIsIkRvbWVzdGljRE5TVHlwZSI6IkRvSCIsIkRvbWVzdGljRE5TRG9tYWluIjoiaHR0cHM6Ly83Ny44OC44LjgvZG5zLXF1ZXJ5IiwiRG9tZXN0aWNETlNJcCI6Ijc3Ljg4LjguOCIsIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiUm91dGVPcmRlciI6ImJsb2NrLXByb3h5LWRpcmVjdCIsIkdsb2JhbFByb3h5Ijp0cnVlLCJGYWtlRG5zIjpmYWxzZSwiRGlyZWN0SVAiOlsiMTAuMC4wLjAvOCIsIjEwMC42NC4wLjAvMTAiLCIxNzIuMTYuMC4wLzEyIiwiMTkyLjE2OC4wLjAvMTYiLCIxNjkuMjU0LjAuMC8xNiIsIjIyNC4wLjAuMC80IiwiMjU1LjI1NS4yNTUuMjU1Il0sIkRuc0hvc3RzIjp7ImxrbnBkLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE4MSIsImxrZmwyLm5hbG9nLnJ1IjoiMjEzLjI0LjY0Ljc1In0sIkdlb3NpdGVVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9zaXRlL2dlb3NpdGUtY2F0ZWdvcnktcnUuc3JzIiwiR2VvaXBVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9pcC9nZW9pcC1ydS5zcnMiLCJCbG9ja1NpdGVzIjpbXSwiUHJveHlTaXRlcyI6W119"
 
 logger.remove()
 logger.add(
@@ -464,7 +468,15 @@ class WebhookHandler:
                             f"• <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe'>Windows</a>\n"
                             f"• <a href='https://github.com/Happ-proxy/happ-desktop/releases/latest'>Linux</a>\n\n"
                         )
-                        msg += "\n🔄 <b>Маршрутизация российской трафика подключается автоматически</b> при добавлении подписки в Happ.\n"
+                        # Кнопка маршрутизации для premium пользователей
+                        route_kb = None
+                        if tier == "premium":
+                            route_kb = InlineKeyboardMarkup(inline_keyboard=[
+                                [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP)]
+                            ])
+                            msg += "\nДля корректной работы российских сервисов напрямую, нажмите кнопку:\n"
+                        else:
+                            msg += "\n🔄 <b>Маршрутизация российской трафика подключается автоматически</b> при добавлении подписки в Happ.\n"
                     else:
                         msg += "🔗 Ваша подписка активирована!\nПроверьте профиль для подключения."
 
@@ -473,6 +485,7 @@ class WebhookHandler:
                         msg,
                         parse_mode="HTML",
                         disable_web_page_preview=True,
+                        reply_markup=route_kb if route_kb else None,
                     )
                     logger.info(
                         f"Уведомление об успешной покупке доставлено пользователю {tg_user_id}"
