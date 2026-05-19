@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     XUI_HOST: str = Field(default="81.26.180.40", description="IP 3x-ui сервера")
     XUI_PORT_STANDARD: int = Field(default=8443, description="Порт Standard inbound")
     XUI_PORT_PREMIUM: int = Field(default=2083, description="Порт Premium inbound")
-    XUI_SNI_STANDARD: str = Field(default="www.microsoft.com", description="SNI Standard")
+    XUI_SNI_STANDARD: str = Field(default="www.yandex.ru", description="SNI Standard")
     XUI_SNI_PREMIUM: str = Field(default="www.yandex.ru", description="SNI Premium")
     XUI_PBK_STANDARD: str = Field(
         default="O1iyQMVfn3K6Yp1Ctoo5vuvkt4H0qaSxHAVglCXud2M",
@@ -44,7 +44,7 @@ class Settings(BaseSettings):
         default="O1iyQMVfn3K6Yp1Ctoo5vuvkt4H0qaSxHAVglCXud2M",
         description="Публичный ключ Reality Premium"
     )
-    XUI_SID_STANDARD: str = Field(default="6c6992c8", description="Short ID Standard")
+    XUI_SID_STANDARD: str = Field(default="5a3b7f1d", description="Short ID Standard")
     XUI_SID_PREMIUM: str = Field(default="5a3b7f1d", description="Short ID Premium")
     SUB_PATH: str = Field(default="e83f38f3d13ccd6a", description="Путь subscription service")
 
