@@ -22,6 +22,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from database.models import User, Notification
 from config import settings
+from services.rate_sync import sync_usdt_rub_rate
 
 
 NOTIFICATION_STEPS = {
@@ -98,6 +99,17 @@ class NotificationScheduler:
             id="check_tier_expiry",
             replace_existing=True,
         )
+        
+        # Синхронизация курса USDT→RUB (каждые 30 минут)
+        self.scheduler.add_job(
+            sync_usdt_rub_rate,
+            trigger=IntervalTrigger(minutes=30),
+            id="sync_usdt_rub_rate",
+            replace_existing=True,
+        )
+        
+        # Сразу синхронизируем курс при старте
+        asyncio.create_task(sync_usdt_rub_rate())
         
         self.scheduler.start()
         self._is_running = True
