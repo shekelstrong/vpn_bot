@@ -213,8 +213,8 @@ class XUIService:
 
         client_uuid = str(uuid_mod.uuid4())
         client_email = f"tg_{tg_id}"
-        sub_id_std = uuid_mod.uuid4().hex[:16]
-        sub_id_wl = uuid_mod.uuid4().hex[:16]
+        # Один subId для обоих inbound'ов (Happ sub-service ищет по subId)
+        sub_id = uuid_mod.uuid4().hex[:16]
 
         # Расчёт expiry
         if expire_hours:
@@ -231,7 +231,7 @@ class XUIService:
             "id": client_uuid,
             "email": client_email,
             "flow": "xtls-rprx-vision",
-            "subId": sub_id_std,
+            "subId": sub_id,
         }
 
         # --- Inbound 2 (Premium: лимит, expiry, limitIp) ---
@@ -243,7 +243,7 @@ class XUIService:
             "limitIp": device_count,
             "totalGB": total_gb_premium,
             "expiryTime": expiry_ms,
-            "subId": sub_id_wl,
+            "subId": sub_id,
         }
 
         # Добавляем клиентов через безопасный /addClient (НЕ ломает inbound)
@@ -267,7 +267,7 @@ class XUIService:
                     ok1 = await self._add_client(INBOUND_STANDARD, client_std)
                 else:
                     # Обновляем subId у существующего
-                    existing_std["subId"] = sub_id_std
+                    existing_std["subId"] = sub_id
                     ib1["settings"] = json.dumps(settings1)
                     ok1 = await self._update_inbound_safe(INBOUND_STANDARD, ib1)
 
@@ -283,7 +283,7 @@ class XUIService:
                     existing_wl["expiryTime"] = expiry_ms
                     existing_wl["totalGB"] = total_gb_premium
                     existing_wl["enable"] = True
-                    existing_wl["subId"] = sub_id_wl
+                    existing_wl["subId"] = sub_id
                     existing_wl["limitIp"] = device_count
                     ib2["settings"] = json.dumps(settings2)
                     ok2 = await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
@@ -310,8 +310,8 @@ class XUIService:
             },
             "subscription_url": "",
             "links": [],
-            "subId": sub_id_std,
-            "subId_wl": sub_id_wl,
+            "subId": sub_id,
+            "subId_wl": sub_id,
         }
 
     async def get_user(self, client_email: str) -> Optional[Dict[str, Any]]:
@@ -627,7 +627,7 @@ class XUIService:
                 "id": client_uuid,
                 "email": client_email,
                 "flow": "xtls-rprx-vision",
-                "subId": uuid_mod.uuid4().hex[:16],
+                "subId": client_wl.get("subId") if client_wl else uuid_mod.uuid4().hex[:16],
                 "created_at": int(datetime.utcnow().timestamp() * 1000),
             }
             settings1["clients"].append(client_new_std)
@@ -654,7 +654,7 @@ class XUIService:
                 "limitIp": 0,
                 "totalGB": 0,
                 "expiryTime": 0,
-                "subId": uuid_mod.uuid4().hex[:16],
+                "subId": client_std.get("subId") if client_std else uuid_mod.uuid4().hex[:16],
                 "created_at": int(datetime.utcnow().timestamp() * 1000),
                 "updated_at": 0,
             }
@@ -702,7 +702,6 @@ class XUIService:
         await self._ensure_login()
 
         new_sub_id = uuid_mod.uuid4().hex[:16]
-        new_sub_id_wl = uuid_mod.uuid4().hex[:16]
 
         # Standard: обновляем subId
         ib1 = await self._get_inbound(INBOUND_STANDARD)
@@ -718,7 +717,7 @@ class XUIService:
         settings2 = json.loads(ib2["settings"])
         client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
         if client_wl:
-            client_wl["subId"] = new_sub_id_wl
+            client_wl["subId"] = new_sub_id
             ib2["settings"] = json.dumps(settings2)
             await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
