@@ -637,22 +637,34 @@ async def broadcast_confirm_send(callback: types.CallbackQuery, state: FSMContex
             # Небольшая задержка для избежания лимитов
             await asyncio.sleep(0.05)
 
-        await callback.message.edit_text(
-            f"✅ Рассылка завершена!\n\n"
-            f"Всего пользователей: {len(user_ids)}\n"
-            f"Успешно: {success_count}\n"
-            f"Не удалось: {fail_count}",
-            reply_markup=get_admin_keyboard()
-        )
+        from aiogram.exceptions import TelegramBadRequest
+
+        try:
+            await callback.message.edit_text(
+                f"✅ Рассылка завершена!\n\n"
+                f"Всего пользователей: {len(user_ids)}\n"
+                f"Успешно: {success_count}\n"
+                f"Не удалось: {fail_count}",
+                reply_markup=get_admin_keyboard()
+            )
+        except TelegramBadRequest as e:
+            # "message is not modified" — текст не изменился, это не ошибка
+            if "not modified" in str(e).lower():
+                logger.info("Рассылка завершена, статус не обновился (текст не изменился)")
+            else:
+                raise
 
         logger.info(f"Админ {callback.from_user.id} провел рассылку: {success_count} успешно, {fail_count} неудачно")
 
     except Exception as e:
         logger.error(f"Ошибка рассылки: {e}")
-        await callback.message.edit_text(
-            "❌ Произошла ошибка при рассылке.",
-            reply_markup=get_admin_keyboard()
-        )
+        try:
+            await callback.message.edit_text(
+                "❌ Произошла ошибка при рассылке.",
+                reply_markup=get_admin_keyboard()
+            )
+        except Exception:
+            pass  # Не смогли даже отправить сообщение об ошибке
 
     await state.clear()
 

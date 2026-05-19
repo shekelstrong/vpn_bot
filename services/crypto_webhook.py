@@ -408,7 +408,7 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
     transaction = Transaction(
         user_id=user_telegram_id, amount=float(amount), currency="RUB",
         payment_method="cryptopay", status="paid", payment_id=invoice.invoice_id,
-        description=f"Оплата подписки на {days} дней (Crypto) | Устройств: {device_count}"
+        description=f"Оплата подписки на {days} дней (Crypto)"
     )
     session.add(transaction)
 
@@ -512,7 +512,6 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
             f"✅ <b>Оплата криптовалютой прошла успешно!</b>\n\n"
             f"💎 Тариф: <b>{tier_name}</b>\n"
             f"⏳ Подписка: <b>{days} дней</b>\n"
-            f"📱 Доступно устройств: <b>{user.device_count}</b>\n"
             f"💰 Сумма: <b>{amount:.2f} RUB</b>\n\n"
         )
         if sub_url:
@@ -540,8 +539,7 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
             f"🆔 ID: <code>{user_telegram_id}</code>\n"
             f"👤 Профиль: {user_display}\n"
             f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
-            f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>\n"
-            f"📱 Устройств: <b>{user.device_count}</b>{referrer_line}"
+            f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>{referrer_line}"
         )
         for admin_id in settings.admin_ids_list:
             try:

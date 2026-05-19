@@ -24,8 +24,10 @@ from services.xui_api import xui_service as marzban_service
 from config import settings, get_db_setting
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Deeplink для маршрутизации Happ — не создаётся автоматически из подписки
-ROUTE_HAPP = "happ://routing/add/eyJOYW1lIjoiTkVNTyBWUE4iLCJSZW1vdGVETlNUeXBlIjoiRG9IIiwiUmVtb3RlRE5TRG9tYWluIjoiaHR0cHM6Ly8xLjEuMS4yL2Rucy1xdWVyeSIsIkRvbWVzdGljRE5TVHlwZSI6IkRvSCIsIkRvbWVzdGljRE5TRG9tYWluIjoiaHR0cHM6Ly83Ny44OC44LjgvZG5zLXF1ZXJ5IiwiRG9tZXN0aWNETlNJcCI6Ijc3Ljg4LjguOCIsIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiUm91dGVPcmRlciI6ImJsb2NrLXByb3h5LWRpcmVjdCIsIkdsb2JhbFByb3h5Ijp0cnVlLCJGYWtlRG5zIjpmYWxzZSwiRGlyZWN0SXAiOlsiMTAuMC4wLjAvOCIsIjEwMC42NC4wLjAvMTAiLCIxNzIuMTYuMC4wLzEyIiwiMTkyLjE2OC4wLjAvMTYiLCIxNjkuMjU0LjAuMC8xNiIsIjIyNC4wLjAuMC80IiwiMjU1LjI1NS4yNTUuMjU1Il0sIkRuc0hvc3RzIjp7ImxrbnBkLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE4MSIsImxrZmwyLm5hbG9nLnJ1IjoiMjEzLjI0LjY0Ljc1In0sIkdlb3NpdGVVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9zaXRlL2dlb3NpdGUtY2F0ZWdvcnktcnUuc3JzIiwiR2VvaXBVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9pcC9nZW9pcC1ydS5zcnMiLCJCbG9ja1NpdGVzIjpbXSwiUHJveHlTaXRlcyI6W119"
+# Маршрутизация Happ — динамические ссылки через sub-service
+ROUTE_HAPP_STANDARD = "https://sub.nemovpn.online/happ/standard"
+ROUTE_HAPP_PREMIUM = "https://sub.nemovpn.online/happ/premium"
+ROUTE_HAPP = ROUTE_HAPP_STANDARD
 
 router = Router()
 
@@ -97,7 +99,7 @@ async def send_subscription_info(
         success_text += "⚠️ Не передавайте ссылку третьим лицам!"
 
         route_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP)]
+            [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP_PREMIUM)]
         ])
         await message.answer(
             text=success_text,
@@ -363,7 +365,7 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
                 link_text += "\n\n⚠️ Не передавайте ссылку третьим лицам!"
 
                 route_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP)]
+                    [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP_PREMIUM)]
                 ])
                 await callback.message.answer(
                     text=link_text, disable_web_page_preview=True, parse_mode="HTML",

@@ -33,8 +33,10 @@ from handlers.admin.notifications import notify_admin_payment, notify_referrer_p
 # Канал Nemo VPN
 CHANNEL_USERNAME = settings.CHANNEL_USERNAME
 
-# Deeplink для маршрутизации Happ — не создаётся автоматически из подписки
-ROUTE_HAPP = "happ://routing/add/eyJOYW1lIjoiTkVNTyBWUE4iLCJSZW1vdGVETlNUeXBlIjoiRG9IIiwiUmVtb3RlRE5TRG9tYWluIjoiaHR0cHM6Ly8xLjEuMS4yL2Rucy1xdWVyeSIsIkRvbWVzdGljRE5TVHlwZSI6IkRvSCIsIkRvbWVzdGljRE5TRG9tYWluIjoiaHR0cHM6Ly83Ny44OC44LjgvZG5zLXF1ZXJ5IiwiRG9tZXN0aWNETlNJcCI6Ijc3Ljg4LjguOCIsIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiUm91dGVPcmRlciI6ImJsb2NrLXByb3h5LWRpcmVjdCIsIkdsb2JhbFByb3h5Ijp0cnVlLCJGYWtlRG5zIjpmYWxzZSwiRGlyZWN0SVAiOlsiMTAuMC4wLjAvOCIsIjEwMC42NC4wLjAvMTAiLCIxNzIuMTYuMC4wLzEyIiwiMTkyLjE2OC4wLjAvMTYiLCIxNjkuMjU0LjAuMC8xNiIsIjIyNC4wLjAuMC80IiwiMjU1LjI1NS4yNTUuMjU1Il0sIkRuc0hvc3RzIjp7ImxrbnBkLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE4MSIsImxrZmwyLm5hbG9nLnJ1IjoiMjEzLjI0LjY0Ljc1In0sIkdlb3NpdGVVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9zaXRlL2dlb3NpdGUtY2F0ZWdvcnktcnUuc3JzIiwiR2VvaXBVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9pcC9nZW9pcC1ydS5zcnMiLCJCbG9ja1NpdGVzIjpbXSwiUHJveHlTaXRlcyI6W119"
+# Маршрутизация Happ — динамические ссылки через sub-service
+ROUTE_HAPP_STANDARD = "https://sub.nemovpn.online/happ/standard"
+ROUTE_HAPP_PREMIUM = "https://sub.nemovpn.online/happ/premium"
+ROUTE_HAPP = ROUTE_HAPP_STANDARD
 
 logger.remove()
 logger.add(
@@ -251,7 +253,7 @@ class WebhookHandler:
                     payment_method=payment_method,
                     status="paid",
                     payment_id=payment_id,
-                    description=f"Оплата подписки на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'}) | Устройств: {device_count}",
+                    description=f"Оплата подписки на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'})",
                 )
                 session.add(transaction)
 
@@ -448,7 +450,6 @@ class WebhookHandler:
                         f"✅ <b>Оплата прошла успешно!</b>\n\n"
                         f"💎 Тариф: <b>{tier_name}</b>\n"
                         f"⏳ Подписка: <b>{days} дней</b>\n"
-                        f"📱 Доступно устройств: <b>{device_count}</b>\n"
                         f"💰 Сумма: <b>{amount:.2f} {currency}</b>\n\n"
                     )
 
@@ -475,7 +476,7 @@ class WebhookHandler:
                         route_kb = None
                         if tier == "premium":
                             route_kb = InlineKeyboardMarkup(inline_keyboard=[
-                                [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP)]
+                                [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP_PREMIUM)]
                             ])
                             msg += "\nДля корректной работы российских сервисов напрямую, нажмите кнопку:\n"
                         else:
@@ -503,7 +504,7 @@ class WebhookHandler:
                     user_id=tg_user_id,
                     amount_rub=amount,
                     username=user.username,
-                    method=f"{payment_method} | Устройств: {device_count}",
+                    method=f"{payment_method}",
                     referrers_bonuses=referrers_bonuses if referrers_bonuses else None,
                 )
 

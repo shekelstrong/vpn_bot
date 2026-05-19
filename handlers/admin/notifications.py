@@ -14,8 +14,12 @@ from typing import List, Dict, Optional
 from loguru import logger
 from config import settings
 
-# Deeplink для маршрутизации Happ — не создаётся автоматически из подписки
-ROUTE_HAPP = "happ://routing/add/eyJOYW1lIjoiTkVNTyBWUE4iLCJSZW1vdGVETlNUeXBlIjoiRG9IIiwiUmVtb3RlRE5TRG9tYWluIjoiaHR0cHM6Ly8xLjEuMS4yL2Rucy1xdWVyeSIsIkRvbWVzdGljRE5TVHlwZSI6IkRvSCIsIkRvbWVzdGljRE5TRG9tYWluIjoiaHR0cHM6Ly83Ny44OC44LjgvZG5zLXF1ZXJ5IiwiRG9tZXN0aWNETlNJcCI6Ijc3Ljg4LjguOCIsIkRvbWFpblN0cmF0ZWd5IjoiSVBJZk5vbk1hdGNoIiwiUm91dGVPcmRlciI6ImJsb2NrLXByb3h5LWRpcmVjdCIsIkdsb2JhbFByb3h5Ijp0cnVlLCJGYWtlRG5zIjpmYWxzZSwiRGlyZWN0SVAiOlsiMTAuMC4wLjAvOCIsIjEwMC42NC4wLjAvMTAiLCIxNzIuMTYuMC4wLzEyIiwiMTkyLjE2OC4wLjAvMTYiLCIxNjkuMjU0LjAuMC8xNiIsIjIyNC4wLjAuMC80IiwiMjU1LjI1NS4yNTUuMjU1Il0sIkRuc0hvc3RzIjp7ImxrbnBkLm5hbG9nLnJ1IjoiMjEzLjI0LjY0LjE4MSIsImxrZmwyLm5hbG9nLnJ1IjoiMjEzLjI0LjY0Ljc1In0sIkdlb3NpdGVVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9zaXRlL2dlb3NpdGUtY2F0ZWdvcnktcnUuc3JzIiwiR2VvaXBVcmwiOiJodHRwczovL25lbW92cG4uY2ZkL3N0YXRpYy9nZW9pcC9nZW9pcC1ydS5zcnMiLCJCbG9ja1NpdGVzIjpbXSwiUHJveHlTaXRlcyI6W119"
+# Маршрутизация Happ — динамические ссылки через sub-service
+# Используются https://ссылки чтобы Happ мог их обработать как deeplink
+ROUTE_HAPP_STANDARD = "https://sub.nemovpn.online/happ/standard"
+ROUTE_HAPP_PREMIUM = "https://sub.nemovpn.online/happ/premium"
+# Fallback: для backward compatibility
+ROUTE_HAPP = ROUTE_HAPP_STANDARD
 
 
 def get_user_link(user_id: int, username: Optional[str] = None) -> str:
@@ -225,23 +229,29 @@ async def notify_user_purchase(
     is_extension: bool = False,
     marzban_username: Optional[str] = None,
     tier: str = "standard",
+    sub_id: Optional[str] = None,
 ):
-    """Уведомление пользователю об успешной покупке/продлении VPN с инструкциями"""
+    """Уведомление пользователю об успешной покупке/продлении VPN с инструкциями.
+    
+    sub_id: ID подписки из 3x-ui для генерации ссылки на sub-service.
+    Если не передан, пытается получить через xui_api.
+    """
     action = "продлена" if is_extension else "оформлена"
 
+    # Формируем ссылку на подписку через sub-service
     subscription_url = ""
-    if marzban_username:
+    if sub_id:
+        subscription_url = f"https://sub.nemovpn.online/e83f38f3d13ccd6a/{sub_id}"
+    elif marzban_username:
         try:
-            from services.xui_api import xui_service as marzban_service
-
-            marzban_data = await marzban_service.get_user(marzban_username)
-            if marzban_data:
-                subscription_url = marzban_data.get("subscription_url", "")
-                if subscription_url and subscription_url.startswith("/"):
-                    base_url = settings.MARZBAN_URL.rstrip("/")
-                    subscription_url = f"{base_url}{subscription_url}"
+            from services.xui_api import xui_service
+            xui_data = await xui_service.get_user(marzban_username)
+            if xui_data:
+                found_sub_id = xui_data.get("subId") or ""
+                if found_sub_id:
+                    subscription_url = f"https://sub.nemovpn.online/e83f38f3d13ccd6a/{found_sub_id}"
         except Exception as e:
-            logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
+            logger.error(f"Ошибка получения subId для {user_id}: {e}")
 
     # Текст основной инструкции (общий для всех)
     instruction_base = (
@@ -278,18 +288,17 @@ async def notify_user_purchase(
     else:
         final_message = instruction_base + "Приятного пользования Nemo VPN! 🌊"
 
-    # Если premium — добавляем inline-кнопку маршрутизации Happ
-    route_kb = None
-    if tier == "premium":
-        route_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ", url=ROUTE_HAPP)]
-        ])
+    # Кнопка маршрутизации Happ — для всех тарифов
+    route_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔑 Настроить маршрутизацию Happ",
+                              url=ROUTE_HAPP_PREMIUM if tier == "premium" else ROUTE_HAPP_STANDARD)]
+    ])
 
     try:
-        # 1. Отправляем основное текстовое сообщение (disable_web_page_preview=True, чтобы не было гигантских превью от ссылок)
+        # 1. Отправляем основное текстовое сообщение
         await bot.send_message(
             user_id, final_message, parse_mode="HTML", disable_web_page_preview=True,
-            reply_markup=route_kb if route_kb else None,
+            reply_markup=route_kb,
         )
 
         # 2. Если удалось получить ссылку, генерируем и отправляем QR-код отдельно

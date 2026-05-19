@@ -697,7 +697,7 @@ class WebhookHandler:
                     payment_method="balance",
                     status="paid",
                     payment_id=payment_id,
-                    description=f"Оплата с баланса на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'}) | Устройств: {device_count}"
+                    description=f"Оплата с баланса на {days} дней ({'VIP' if tier == 'premium' else 'Обычный'})"
                 )
                 session.add(transaction)
                 
@@ -804,7 +804,6 @@ class WebhookHandler:
                     f"✅ <b>Оплата с баланса прошла успешно!</b>\n\n"
                     f"💎 Тариф: <b>{tier_name}</b>\n"
                     f"⏳ Подписка: <b>{days} дней</b>\n"
-                    f"📱 Доступно устройств: <b>{user.device_count}</b>\n"
                     f"💰 Списано: <b>{amount:.2f} RUB</b>\n\n"
                 )
                 
@@ -829,8 +828,7 @@ class WebhookHandler:
                     f"🆔 ID: <code>{tg_id}</code>\n"
                     f"👤 Профиль: {user_display}\n"
                     f"💵 Сумма: <b>{amount:.2f}₽</b>\n"
-                    f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>\n"
-                    f"📱 Устройств: <b>{device_count}</b>"
+                    f"📦 Тариф: <b>{'VIP' if tier == 'premium' else 'Обычный'} ({days} дней)</b>"
                 )
                 for admin_id in settings.admin_ids_list:
                     await self.bot.send_message(admin_id, admin_msg, parse_mode="HTML")
