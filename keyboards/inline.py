@@ -151,10 +151,10 @@ def get_back_keyboard(callback_data: str = "back_to_main") -> InlineKeyboardMark
 # =====================================================================
 
 TRAFFIC_PACKAGES = [
-    {"gb": 50, "price": 100},
-    {"gb": 100, "price": 200},
-    {"gb": 300, "price": 600},
-    {"gb": 500, "price": 1000},
+    {"gb": 50, "price": 200},
+    {"gb": 100, "price": 400},
+    {"gb": 300, "price": 1000},
+    {"gb": 500, "price": 2000},
 ]
 
 

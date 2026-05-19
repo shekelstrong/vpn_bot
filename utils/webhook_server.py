@@ -947,18 +947,18 @@ class WebhookHandler:
                 }
                 gb_limit = GB_LIMITS.get(days, days * 3)
 
-            # Цены подарка (можно вынести в настройки)
+            # Цены подарка (единая подписка = оба конфига)
             GIFT_PRICES = {
-                ("premium", 30): 300,
-                ("premium", 90): 800,
-                ("premium", 180): 1400,
-                ("premium", 365): 2500,
-                ("standard", 30): 150,
-                ("standard", 90): 400,
-                ("standard", 180): 700,
-                ("standard", 365): 1200,
+                ("premium", 30): 700,
+                ("premium", 90): 1800,
+                ("premium", 180): 3000,
+                ("premium", 365): 5500,
+                ("standard", 30): 700,
+                ("standard", 90): 1800,
+                ("standard", 180): 3000,
+                ("standard", 365): 5500,
             }
-            price = data.get("price") or GIFT_PRICES.get((tier, days), 300)
+            price = data.get("price") or GIFT_PRICES.get((tier, days), 700)
 
             logger.info(f"🎁 Создание подарочного инвойса: {tg_id}, {tier}, {days}дн, {price}₽, {gb_limit} ГБ")
 
@@ -1061,16 +1061,16 @@ class WebhookHandler:
 
             # Определяем цену (аналогично gift/subscription)
             GIFT_PRICES = {
-                ("premium", 30): 300,
-                ("premium", 90): 800,
-                ("premium", 180): 1400,
-                ("premium", 365): 2500,
-                ("standard", 30): 150,
-                ("standard", 90): 400,
-                ("standard", 180): 700,
-                ("standard", 365): 1200,
+                ("premium", 30): 700,
+                ("premium", 90): 1800,
+                ("premium", 180): 3000,
+                ("premium", 365): 5500,
+                ("standard", 30): 700,
+                ("standard", 90): 1800,
+                ("standard", 180): 3000,
+                ("standard", 365): 5500,
             }
-            amount = float(data.get("amount") or GIFT_PRICES.get((tier, days), 300))
+            amount = float(data.get("amount") or GIFT_PRICES.get((tier, days), 700))
 
             logger.info(f"👥 Оплата с реферального баланса: {tg_id}, {amount}₽, {tier}, {days}дн")
 

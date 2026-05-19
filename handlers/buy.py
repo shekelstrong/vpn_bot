@@ -182,7 +182,7 @@ async def gift_select_duration(callback: types.CallbackQuery, state: FSMContext)
         ("standard", 30): 700, ("standard", 90): 1800,
         ("standard", 180): 3000, ("standard", 365): 5500,
     }
-    price = GIFT_PRICES.get((tier, days), 300)
+    price = GIFT_PRICES.get((tier, days), 700)
     
     await state.update_data(gift_days=days, gift_price=price)
     
