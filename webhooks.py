@@ -535,7 +535,7 @@ async def run_webhooks():
     await site.start()
 
     logger.info("=" * 50)
-    logger.info("Вебхук-сервер Nemo VPN запущен (Порт {settings.WEB_PORT})!")
+    logger.info(f"Вебхук-сервер Nemo VPN запущен (Порт {settings.WEB_PORT})!")
     logger.info("Webhooks:")
     logger.info(f"  - https://{settings.BASE_URL}/cryptopay (CryptoBot)")
     logger.info(f"  - https://{settings.BASE_URL}/webhook/platega (Platega)")

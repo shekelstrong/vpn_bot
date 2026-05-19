@@ -1590,5 +1590,5 @@ async def run_webhooks(bot=None):
     await site.start()
     
     logger.info("=" * 50)
-    logger.info("Вебхук-сервер Nemo VPN запущен (Порт {settings.WEB_PORT}) с поддержкой Mini App API!")
+    logger.info(f"Вебхук-сервер Nemo VPN запущен (Порт {settings.WEB_PORT}) с поддержкой Mini App API!")
     logger.info("=" * 50)
