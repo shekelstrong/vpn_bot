@@ -15,7 +15,7 @@ from loguru import logger
 
 from database.models import User
 from keyboards.inline import get_main_menu_keyboard
-from services.xui_api import xui_service as marzban_service
+from services.xui_api import xui_service
 from config import settings, get_db_setting
 
 
@@ -109,13 +109,13 @@ async def show_trial(
             return
 
         try:
-            marzban_data = await marzban_service.get_user(user.marzban_username)
+            marzban_data = await xui_service.get_user(user.marzban_username)
             if not marzban_data:
-                # Аккаунт удалён в Marzban - создаём заново с параметрами триала
+                # Аккаунт удалён в 3x-ui - создаём заново с параметрами триала
                 trial_hours = await get_db_setting(session, "trial_hours", "24")
                 trial_limit = await get_db_setting(session, "trial_data_limit", "1")
 
-                marzban_data = await marzban_service.create_user(
+                marzban_data = await xui_service.create_user(
                     tg_id=user_id,
                     username=user.username,
                     expire_hours=int(trial_hours),
@@ -124,14 +124,11 @@ async def show_trial(
                 user.marzban_username = marzban_data.get("username")
                 await session.commit()
                 logger.info(
-                    f"Пересоздан аккаунт Marzban для пользователя {user_id} с триалом"
+                    f"Пересоздан аккаунт 3x-ui для пользователя {user_id} с триалом"
                 )
 
-            subscription_url = marzban_data.get("subscription_url", "")
-            if subscription_url and subscription_url.startswith("/"):
-                base_url = settings.MARZBAN_URL.rstrip("/")
-                subscription_url = f"{base_url}{subscription_url}"
-            # subscription_url is plain — Happ auto-loads routing via v2ray-json
+            # Получаем ссылку на подписку из sub-service
+            subscription_url = await xui_service.get_user_subscription(user.marzban_username)
 
             if subscription_url:
                 await send_trial_info(message, subscription_url)
@@ -154,12 +151,12 @@ async def show_trial(
         trial_hours = await get_db_setting(session, "trial_hours", "24")
         trial_limit = await get_db_setting(session, "trial_data_limit", "1")
         text = (
-            f"🎁 <b>Бесплатный триал Nemo VPN</b>\n\n"
-            f"Попробуйте наш VPN-сервис бесплатно в течение {trial_hours} часов!\n\n"
+            f"🎁 <b>Бесплатный триал NEMO VPN</b>\n\n"
+            f"Попробуйте наш VPN-сервис бесплатно!\n\n"
             "✨ <b>Что вы получите:</b>\n"
             f"▫️ {trial_hours} часов доступа\n"
             f"▫️ {trial_limit} GB трафика\n"
-            "▫️ Доступ ко всем серверам\n"
+            "▫️ Стандартный конфиг + обход белых списков\n"
             "▫️ Протокол VLESS Reality\n\n"
             "⚠️ Триал доступен только один раз!\n\n"
             "Готовы попробовать? Нажмите «Активировать триал»"
@@ -203,12 +200,12 @@ async def show_trial(
         trial_hours = await get_db_setting(session, "trial_hours", "24")
         trial_limit = await get_db_setting(session, "trial_data_limit", "1")
         text = (
-            f"🎁 <b>Бесплатный триал Nemo VPN</b>\n\n"
-            f"Попробуйте наш VPN-сервис бесплатно в течение {trial_hours} часов!\n\n"
+            f"🎁 <b>Бесплатный триал NEMO VPN</b>\n\n"
+            f"Попробуйте наш VPN-сервис бесплатно!\n\n"
             "✨ <b>Что вы получите:</b>\n"
             f"▫️ {trial_hours} часов доступа\n"
             f"▫️ {trial_limit} GB трафика\n"
-            "▫️ Доступ ко всем серверам\n"
+            "▫️ Стандартный конфиг + обход белых списков\n"
             "▫️ Протокол VLESS Reality\n\n"
             "⚠️ Триал доступен только один раз!\n\n"
             "Готовы попробовать? Нажмите «Активировать триал»"
@@ -262,7 +259,7 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
         trial_hours = await get_db_setting(session, "trial_hours", "24")
         trial_limit = await get_db_setting(session, "trial_data_limit", "1")
 
-        marzban_data = await marzban_service.create_user(
+        marzban_data = await xui_service.create_user(
             tg_id=user_id,
             username=user.username,
             expire_hours=int(trial_hours),
@@ -274,11 +271,8 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
         user.expire_date = datetime.utcnow() + timedelta(hours=int(trial_hours))
         await session.commit()
 
-        subscription_url = marzban_data.get("subscription_url", "")
-        if subscription_url and subscription_url.startswith("/"):
-            base_url = settings.MARZBAN_URL.rstrip("/")
-            subscription_url = f"{base_url}{subscription_url}"
-        # subscription_url is plain — Happ auto-loads routing via v2ray-json
+        # Получаем ссылку на подписку из sub-service
+        subscription_url = await xui_service.get_user_subscription(user.marzban_username)
 
         if not subscription_url:
             await callback.message.answer("❌ Ошибка генерации ссылки сервером.")

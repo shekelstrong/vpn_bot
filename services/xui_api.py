@@ -212,7 +212,7 @@ class XUIService:
         await self._ensure_login()
 
         client_uuid = str(uuid_mod.uuid4())
-        client_email = f"user_{tg_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        client_email = f"tg_{tg_id}"
         sub_id_std = uuid_mod.uuid4().hex[:16]
         sub_id_wl = uuid_mod.uuid4().hex[:16]
 
@@ -247,8 +247,46 @@ class XUIService:
         }
 
         # Добавляем клиентов через безопасный /addClient (НЕ ломает inbound)
+        # Но если клиент уже существует (повторная подписка), нужно обновить через inbound update
         ok1 = await self._add_client(INBOUND_STANDARD, client_std)
         ok2 = await self._add_client(INBOUND_PREMIUM, client_wl)
+
+        # Если addClient не удался из-за дубликата email — обновляем существующего
+        if not ok1 or not ok2:
+            logger.warning(f"addClient не удался для {client_email}, пробуем обновить существующего")
+            if not ok1:
+                ib1 = await self._get_inbound(INBOUND_STANDARD)
+                settings1 = json.loads(ib1["settings"])
+                existing_std = self._find_client_by_email(settings1["clients"], client_email)
+                if not existing_std:
+                    # Клиент не найден — создаём с другим UUID
+                    client_uuid_new = str(uuid_mod.uuid4())
+                    client_std["id"] = client_uuid_new
+                    client_wl["id"] = client_uuid_new
+                    client_uuid = client_uuid_new
+                    ok1 = await self._add_client(INBOUND_STANDARD, client_std)
+                else:
+                    # Обновляем subId у существующего
+                    existing_std["subId"] = sub_id_std
+                    ib1["settings"] = json.dumps(settings1)
+                    ok1 = await self._update_inbound_safe(INBOUND_STANDARD, ib1)
+
+            if not ok2:
+                ib2 = await self._get_inbound(INBOUND_PREMIUM)
+                settings2 = json.loads(ib2["settings"])
+                existing_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
+                if not existing_wl:
+                    client_wl["id"] = client_uuid
+                    ok2 = await self._add_client(INBOUND_PREMIUM, client_wl)
+                else:
+                    # Обновляем параметры Premium клиента
+                    existing_wl["expiryTime"] = expiry_ms
+                    existing_wl["totalGB"] = total_gb_premium
+                    existing_wl["enable"] = True
+                    existing_wl["subId"] = sub_id_wl
+                    existing_wl["limitIp"] = device_count
+                    ib2["settings"] = json.dumps(settings2)
+                    ok2 = await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         if not (ok1 and ok2):
             raise Exception(f"Не удалось создать клиента: standard={ok1}, premium={ok2}")

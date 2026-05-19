@@ -49,7 +49,7 @@ async def edit_message_content(
         logger.error(f"Ошибка редактирования сообщения: {e}")
 
 async def generate_marzban_username(user_id: int) -> str:
-    return f"tg_{user_id}_{str(uuid.uuid4())[:6]}"
+    return f"tg_{user_id}"
 
 
 async def check_channel_subscription(bot: Bot, user_id: int) -> bool:
