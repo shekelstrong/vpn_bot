@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from config import settings
 from database.models import User, PaymentInvoice
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 import json
 
 

@@ -226,7 +226,7 @@ async def check_channel_sub_callback(callback: CallbackQuery, session: AsyncSess
 
 async def process_gift_activation(message: Message, session: AsyncSession, bot: Bot, user_id: int, code: str):
     """Активация подарочного кода."""
-    from services.marzban_api import marzban_service
+    from services.xui_api import xui_service as marzban_service
     from datetime import timedelta
 
     result = await session.execute(select(GiftCode).where(GiftCode.code == code))

@@ -25,7 +25,7 @@ from typing import Optional
 from config import settings
 from database.models import User, PaymentInvoice, Transaction
 from database.engine import get_session_factory, init_db
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 from services.payment_platega import platega_service
 from services.payment_crypto import check_webhook_signature
 from handlers.admin.notifications import notify_admin_payment, notify_referrer_payment
@@ -390,11 +390,16 @@ class WebhookHandler:
                     if new_data_limit is not None:
                         update_data["data_limit"] = new_data_limit
 
-                    await marzban_service._request(
-                        "PUT", f"/user/{user.marzban_username}", json=update_data
+                    await marzban_service.update_user_full(
+                        user.marzban_username,
+                        extra_days=total_days,
+                        tier=tier if "vless-reality-whitelist" in active_inbounds else "standard",
+                        device_count=device_count,
+                        data_limit_gb=user.gb_limit if (user.gb_limit and user.gb_limit > 0) else 0,
+                        inbounds=active_inbounds,
                     )
                     logger.info(
-                        f"Marzban обновлён для {user.marzban_username}: inbounds={active_inbounds}, +{total_days}д"
+                        f"3x-ui обновлён для {user.marzban_username}: inbounds={active_inbounds}, +{total_days}д"
                     )
                 else:
                     # Создаём новый аккаунт
@@ -415,10 +420,8 @@ class WebhookHandler:
 
                     # Если есть оба inbound-а — обновляем
                     if len(active_inbounds) > 1:
-                        await marzban_service._request(
-                            "PUT",
-                            f"/user/{user.marzban_username}",
-                            json={"inbounds": {"vless": active_inbounds}},
+                        await marzban_service.update_user_inbounds(
+                            user.marzban_username, active_inbounds
                         )
 
                 await session.commit()

@@ -232,7 +232,7 @@ async def notify_user_purchase(
     subscription_url = ""
     if marzban_username:
         try:
-            from services.marzban_api import marzban_service
+            from services.xui_api import xui_service as marzban_service
 
             marzban_data = await marzban_service.get_user(marzban_username)
             if marzban_data:

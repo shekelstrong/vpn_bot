@@ -20,7 +20,7 @@ from datetime import datetime
 from loguru import logger
 from database.models import User
 from keyboards.inline import get_profile_keyboard, get_main_menu_keyboard
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 from config import settings, get_db_setting
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 

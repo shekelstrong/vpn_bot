@@ -211,7 +211,7 @@ class NotificationScheduler:
         Если один из тарифов истёк — обновляем inbound-ы в Marzban
         и отправляем уведомление пользователю.
         """
-        from services.marzban_api import marzban_service
+        from services.xui_api import xui_service as marzban_service
         
         async with self.db_session_factory() as session:
             try:
@@ -285,18 +285,8 @@ class NotificationScheduler:
                 return
             
             # Обновляем inbound-ы
-            proxies = {"vless": {"flow": ""}}
-            if "vless-reality-whitelist" in active_inbounds:
-                proxies = {"vless": {"flow": "xtls-rprx-vision"}}
-            
-            update_data = {
-                "inbounds": {"vless": active_inbounds},
-                "proxies": proxies,
-                "status": "active",
-            }
-            
-            await marzban_service._request("PUT", f"/user/{user.marzban_username}", json=update_data)
-            logger.info(f"Marzban: обновлены inbound-ы для {user.marzban_username} → {active_inbounds}")
+            await marzban_service.update_user_inbounds(user.marzban_username, active_inbounds)
+            logger.info(f"3x-ui: обновлены inbound-ы для {user.marzban_username} → {active_inbounds}")
             
             # Обновляем tier пользователя на основе активных подписок
             if premium_expired and not standard_expired:

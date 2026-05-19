@@ -31,7 +31,7 @@ from loguru import logger
 from config import settings, init_default_settings
 from database.engine import init_db, close_db, get_session_factory
 from database.models import User, BotSettings
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 from utils.scheduler import create_scheduler, get_scheduler
 
 # Импортируем роутеры

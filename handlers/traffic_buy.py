@@ -13,7 +13,7 @@ from loguru import logger
 
 from database.models import User, PaymentInvoice, Transaction
 from keyboards.inline import get_traffic_buy_keyboard, get_traffic_payment_keyboard, TRAFFIC_PACKAGES
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 from services.payment_crypto import crypto_bot_service
 from config import settings
 

@@ -14,7 +14,7 @@ from keyboards.inline import (
     get_main_menu_keyboard,
 )
 from config import settings, get_db_setting, update_db_setting
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 
 router = Router(name="settings_router")
 

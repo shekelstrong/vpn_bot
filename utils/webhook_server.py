@@ -22,34 +22,30 @@ from config import settings
 # Импорты обработчиков
 from services.crypto_webhook import handle_crypto_webhook_update
 from services.platega_webhook import handle_platega_webhook_update
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 from services.payment_crypto import crypto_bot_service
 
 
 async def _find_orphan_marzban_account(tg_id: int) -> str | None:
-    """Найти сиротский Marzban-аккаунт для данного tg_id.
-    Ищет по паттернам user_{tg_id}_* и tg_{tg_id}_*."""
+    """Найти сиротский аккаунт для данного tg_id.
+    Ищет по паттернам user_{tg_id}_* и tg_{tg_id}_* в inbound'ах 3x-ui."""
     try:
-        import httpx
-        token = await marzban_service.get_token()
-        headers = {"Authorization": f"Bearer {token}"}
-        base = marzban_service.base_url
-        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
-            resp = await client.get(f"{base}/users", headers=headers, params={"username": f"user_{tg_id}_"})
-            if resp.status_code == 200:
-                data = resp.json()
-                for u in data.get("users", []):
-                    uname = u.get("username", "")
-                    if uname.startswith(f"user_{tg_id}_") or uname.startswith(f"tg_{tg_id}_"):
-                        return uname
+        await marzban_service._ensure_login()
+        # Search in Standard inbound (1)
+        ib1 = await marzban_service._get_inbound(1)
+        settings1 = json.loads(ib1["settings"])
+        for cl in settings1.get("clients", []):
+            email = cl.get("email", "")
+            if email.startswith(f"user_{tg_id}_") or email.startswith(f"tg_{tg_id}_"):
+                return email
     except Exception as e:
-        logger.warning(f"Marzban lookup сироты {tg_id}: {e}")
+        logger.warning(f"3x-ui lookup сироты {tg_id}: {e}")
     return None
 
 
 async def _sync_marzban_to_user(user: User) -> None:
-    """Синхронизировать данные из Marzban в локальную модель User.
-    Подтягивает tier, expire, data_limit из активного Marzban-аккаунта."""
+    """Синхронизировать данные из 3x-ui в локальную модель User.
+    Подтягивает tier, expire, data_limit из активного аккаунта."""
     if not user.marzban_username:
         return
     try:
@@ -81,14 +77,14 @@ async def _sync_marzban_to_user(user: User) -> None:
         if data_limit > 0:
             user.gb_limit = round(data_limit / (1024**3), 2)
 
-        # ip_limit
-        ip_limit = mz.get("ip_limit") or 1
+        # limitIp (3x-ui: limitIp, Marzban: ip_limit)
+        ip_limit = mz.get("limitIp") or mz.get("ip_limit") or 1
         user.device_count = ip_limit
 
         user.recalculate_expire_date()
-        logger.info(f"🔧 Синхронизированы данные Marzban → User для {user.user_id}: tier={user.tier}, expire={user.expire_date}")
+        logger.info(f"🔧 Синхронизированы данные 3x-ui → User для {user.user_id}: tier={user.tier}, expire={user.expire_date}")
     except Exception as e:
-        logger.error(f"Ошибка синхронизации Marzban для {user.user_id}: {e}")
+        logger.error(f"Ошибка синхронизации 3x-ui для {user.user_id}: {e}")
 
 
 async def _ensure_user_exists(session, tg_id: int, username: str = None) -> User:
@@ -244,7 +240,7 @@ class WebhookHandler:
 
                 current_expire = marzban_data.get("expire") or 0
                 current_data_limit = marzban_data.get("data_limit")
-                current_ip_limit = marzban_data.get("ip_limit", 1) or 1
+                current_ip_limit = marzban_data.get("limitIp") or marzban_data.get("ip_limit", 1) or 1
                 current_inbounds = marzban_data.get("inbounds", {}).get("vless", ["vless-reality-standard"])
                 current_used = marzban_data.get("used_traffic", 0) or 0
 
@@ -728,8 +724,15 @@ class WebhookHandler:
                         if new_data_limit is not None:
                             update_data["data_limit"] = new_data_limit
 
-                        await marzban_service._request("PUT", f"/user/{user.marzban_username}", json=update_data)
-                        logger.info(f"Marzban обновлён [balance]: {user.marzban_username}, inbounds={active_inbounds}, +{total_days}д")
+                        await marzban_service.update_user_full(
+                            user.marzban_username,
+                            extra_days=total_days,
+                            tier=tier if "vless-reality-whitelist" in active_inbounds else "standard",
+                            device_count=device_count,
+                            data_limit_gb=user.gb_limit if (user.gb_limit and user.gb_limit > 0) else 0,
+                            inbounds=active_inbounds,
+                        )
+                        logger.info(f"3x-ui обновлён [balance]: {user.marzban_username}, inbounds={active_inbounds}, +{total_days}д")
                     else:
                         gb_new = 0
                         if tier == "premium":
@@ -1167,8 +1170,15 @@ class WebhookHandler:
                         if new_data_limit is not None:
                             update_data["data_limit"] = new_data_limit
 
-                        await marzban_service._request("PUT", f"/user/{user.marzban_username}", json=update_data)
-                        logger.info(f"Marzban обновлён [referral]: {user.marzban_username}, inbounds={active_inbounds}, +{total_days}д")
+                        await marzban_service.update_user_full(
+                            user.marzban_username,
+                            extra_days=total_days,
+                            tier=tier if "vless-reality-whitelist" in active_inbounds else "standard",
+                            device_count=user.device_count or 1,
+                            data_limit_gb=user.gb_limit if (user.gb_limit and user.gb_limit > 0) else 0,
+                            inbounds=active_inbounds,
+                        )
+                        logger.info(f"3x-ui обновлён [referral]: {user.marzban_username}, inbounds={active_inbounds}, +{total_days}д")
                     else:
                         gb_new = 0
                         if tier == "premium":

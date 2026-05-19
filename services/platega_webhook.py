@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from config import settings
 from database.models import User, PaymentInvoice, Transaction, GiftCode
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from database.engine import get_session_factory
@@ -30,27 +30,26 @@ async def _ensure_user_for_webhook(session, tg_id: int) -> User:
     import uuid as _uuid
     marzban_username = f"tg_{tg_id}_{_uuid.uuid4().hex[:6]}"
 
-    # Попробовать найти сиротский Marzban-аккаунт
+    # Попробовать найти сиротский 3x-ui аккаунт
+    _found_orphan = False
     try:
-        import httpx
-        token = await marzban_service.get_token()
-        headers = {"Authorization": f"Bearer {token}"}
-        base = marzban_service.base_url
-        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
-            resp = await client.get(f"{base}/users", headers=headers, params={"username": f"user_{tg_id}_"})
-            if resp.status_code == 200:
-                data = resp.json()
-                for u in data.get("users", []):
-                    uname = u.get("username", "")
-                    if uname.startswith(f"user_{tg_id}_") or uname.startswith(f"tg_{tg_id}_"):
-                        marzban_username = uname
-                        break
+        await marzban_service._ensure_login()
+        for _inbound_id in (1, 2):
+            inbound_data = await marzban_service._get_inbound(_inbound_id)
+            for client in inbound_data.get("settings", {}).get("clients", []):
+                email = client.get("email", "")
+                if email.startswith(f"user_{tg_id}_") or email.startswith(f"tg_{tg_id}_"):
+                    marzban_username = email
+                    _found_orphan = True
+                    break
+            if _found_orphan:
+                break
     except Exception as e:
-        logger.warning(f"Marzban lookup для сироты {tg_id}: {e}")
+        logger.warning(f"3x-ui lookup для сироты {tg_id}: {e}")
 
     user = User(user_id=tg_id, marzban_username=marzban_username)
 
-    # Синхронизируем данные из Marzban если нашли сироту
+    # Синхронизируем данные из 3x-ui если нашли сироту
     if marzban_username.startswith(f"user_{tg_id}_") or marzban_username.startswith(f"tg_{tg_id}_"):
         try:
             mz = await marzban_service.get_user(marzban_username)
@@ -75,9 +74,9 @@ async def _ensure_user_for_webhook(session, tg_id: int) -> User:
                 if data_limit > 0:
                     user.gb_limit = round(data_limit / (1024**3), 2)
 
-                user.device_count = mz.get("ip_limit") or 1
+                user.device_count = mz.get("limitIp") or mz.get("ip_limit") or 1
                 user.recalculate_expire_date()
-                logger.info(f"🔧 [Platega] Синхронизированы данные Marzban для {tg_id}: tier={user.tier}")
+                logger.info(f"🔧 [Platega] Синхронизированы данные 3x-ui для {tg_id}: tier={user.tier}")
         except Exception as e:
             logger.error(f"Ошибка синхронизации Marzban для {tg_id}: {e}")
 

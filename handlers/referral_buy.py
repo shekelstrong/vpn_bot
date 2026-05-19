@@ -12,7 +12,7 @@ from loguru import logger
 
 from database.models import User, Transaction
 from keyboards.inline import get_tier_selection_keyboard, get_subscription_duration_keyboard, get_buy_keyboard
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 from config import settings, get_db_setting, calculate_tariff_price
 
 router = Router(name="referral_buy_router")

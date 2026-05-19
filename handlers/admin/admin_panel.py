@@ -435,7 +435,7 @@ async def process_gift_days(message: types.Message, state: FSMContext, session: 
         
         # Если есть Marzban пользователь, продлеваем там
         if user.marzban_username:
-            from services.marzban_api import marzban_service
+            from services.xui_api import xui_service as marzban_service
             try:
                 await marzban_service.update_user_expiry(
                     user.marzban_username,

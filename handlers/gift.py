@@ -15,7 +15,7 @@ from database.models import User, PaymentInvoice, Transaction, GiftCode
 from keyboards.inline import (
     get_gift_tier_keyboard, get_gift_duration_keyboard, get_gift_payment_keyboard
 )
-from services.marzban_api import marzban_service
+from services.xui_api import xui_service as marzban_service
 from services.payment_crypto import crypto_bot_service
 from config import settings, get_db_setting, calculate_tariff_price
 
