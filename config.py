@@ -93,12 +93,8 @@ class Settings(BaseSettings):
     TRIAL_DATA_LIMIT_GB: int = Field(default=1, description="Лимит трафика для триала (GB)")
     TRIAL_EXPIRE_HOURS: int = Field(default=24, description="Время действия триала (часы)")
 
-    # Subscription настройки (Обычный тариф)
-    SUBSCRIPTION_PRICE_RUB: int = Field(default=100, description="Цена подписки в рублях")
-    SUBSCRIPTION_EXPIRE_DAYS: int = Field(default=30, description="Срок подписки в днях")
-    
-    # Subscription настройки (VIP тариф - Обход белых списков)
-    PREMIUM_PRICE_RUB: int = Field(default=300, description="Цена VIP подписки в рублях")
+    # Subscription настройки (единая подписка = оба конфига)
+    SUBSCRIPTION_PRICE_RUB: int = Field(default=500, description="Цена подписки в рублях (1 мес)")
 
     # Бонус за подписку на канал
     CHANNEL_BONUS_DAYS: int = Field(default=3, description="Бонус дней за подписку на канал")
@@ -127,10 +123,10 @@ class Settings(BaseSettings):
         description="Ссылка на Happ для Linux"
     )
 
-    # GB лимиты для VIP по длительности подписки
+    # GB лимиты по длительности подписки (для БС инбаунда)
     VIP_GB_LIMITS: str = Field(
-        default="100,350,800,2048",
-        description="Лимиты GB для VIP: 1мес, 3мес, 6мес, 12мес"
+        default="10,100,350,800,2048",
+        description="Лимиты GB: 3д, 1мес, 3мес, 6мес, 12мес"
     )
 
     class Config:
@@ -159,8 +155,8 @@ class Settings(BaseSettings):
         return [int(x.strip()) for x in self.VIP_GB_LIMITS.split(",")]
 
     def get_vip_gb_limit(self, days: int) -> int:
-        """Получить GB лимит для VIP по количеству дней подписки."""
-        gb_map = {30: 100, 90: 350, 180: 800, 365: 2048}
+        """Получить GB лимит по количеству дней подписки."""
+        gb_map = {3: 10, 30: 100, 90: 350, 180: 800, 365: 2048}
         return gb_map.get(days, days * 3)
 
 
@@ -191,8 +187,7 @@ async def update_db_setting(session: AsyncSession, key: str, value: str, descrip
 async def init_default_settings(session: AsyncSession) -> None:
     from database.models import BotSettings
     defaults = {
-        "subscription_price": ("100", "Цена обычной подписки в рублях"),
-        "premium_subscription_price": ("300", "Цена VIP подписки (Обход белых списков) в рублях"),
+        "subscription_price": ("500", "Цена подписки в рублях (1 мес, оба конфига)"),
         "subscription_duration": ("30", "Базовый срок подписки в днях"),
         "trial_hours": ("24", "Срок действия триала в часах"),
         "trial_data_limit": ("1", "Лимит трафика для триала в GB"),
@@ -200,9 +195,9 @@ async def init_default_settings(session: AsyncSession) -> None:
         "referral_level2": ("10", "Процент рефералов уровня 2"),
         "referral_level3": ("5", "Процент рефералов уровня 3"),
         "referral_min_withdraw": ("1000", "Минимальная сумма вывода в рублях"),
-        "discount_3month": ("10", "Скидка на 3 месяца (в процентах)"),
-        "discount_6month": ("17", "Скидка на 6 месяцев (в процентах)"),
-        "discount_12month": ("25", "Скидка на 12 месяцев (в процентах)"),
+        "discount_3month": ("0", "Скидка на 3 месяца (в процентах)"),
+        "discount_6month": ("0", "Скидка на 6 месяцев (в процентах)"),
+        "discount_12month": ("0", "Скидка на 12 месяцев (в процентах)"),
         "channel_bonus_days": ("3", "Бонус дней за подписку на канал"),
     }
     for key, (value, desc) in defaults.items():

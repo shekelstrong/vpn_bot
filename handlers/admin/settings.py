@@ -21,7 +21,6 @@ router = Router(name="settings_router")
 class SettingsStates(StatesGroup):
     """Состояния для FSM настроек."""
     waiting_for_price = State()
-    waiting_for_premium_price = State()  # Для VIP тарифа
     waiting_for_referral = State()
     waiting_for_trial = State()
     waiting_for_discount = State()
@@ -61,22 +60,19 @@ async def show_tariff_settings(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("❌ У вас нет прав", show_alert=True)
         return
 
-    subscription_price = await get_db_setting(session, "subscription_price", "100")
-    premium_price = await get_db_setting(session, "premium_subscription_price", "300")
+    subscription_price = await get_db_setting(session, "subscription_price", "500")
 
     text = (
         "📊 <b>Настройки тарифов</b>\n\n"
-        f"🛡 Обычный VPN (1 месяц): <b>{subscription_price}₽</b>\n"
-        f"🚀 VIP Обход списков (1 месяц): <b>{premium_price}₽</b>\n\n"
-        "💡 Цены на 3, 6 и 12 месяцев рассчитываются автоматически\n"
-        "с учетом настроенных скидок."
+        f"🛡 NEMO VPN (1 месяц): <b>{subscription_price}₽</b>\n\n"
+        "💡 Единая подписка включает оба конфига.\n"
+        "Цены фиксированные (не рассчитываются автоматически)."
     )
 
     await callback.message.edit_text(
         text=text,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✏️ Изменить цену Обычного VPN", callback_data="edit_subscription_price")],
-            [InlineKeyboardButton(text="✏️ Изменить цену VIP тарифа", callback_data="edit_premium_price")],
+            [InlineKeyboardButton(text="✏️ Изменить цену подписки", callback_data="edit_subscription_price")],
             [InlineKeyboardButton(text="🔙 Назад", callback_data="settings")]
         ])
     )
@@ -84,16 +80,15 @@ async def show_tariff_settings(callback: CallbackQuery, session: AsyncSession):
 
 @router.callback_query(F.data == "edit_subscription_price")
 async def edit_subscription_price(callback: CallbackQuery, state: FSMContext):
-    """Начало редактирования цены подписки Обычного VPN."""
+    """Начало редактирования цены подписки."""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ У вас нет прав", show_alert=True)
         return
 
     await callback.message.edit_text(
-        text="✏️ <b>Изменение цены Обычного VPN</b>\n\n"
-             "Введите новую цену подписки (в рублях):\n\n"
-             "⚠️ После изменения цены автоматически обновятся\n"
-             "все тарифы (1, 3, 6, 12 месяцев).",
+        text="✏️ <b>Изменение цены подписки NEMO VPN</b>\n\n"
+             "Введите новую цену подписки за 1 месяц (в рублях):\n\n"
+             "⚠️ Цены на другие сроки заданы фиксированно.",
         reply_markup=get_back_keyboard("settings_tariffs")
     )
     await state.set_state(SettingsStates.waiting_for_price)
@@ -101,7 +96,7 @@ async def edit_subscription_price(callback: CallbackQuery, state: FSMContext):
 
 @router.message(SettingsStates.waiting_for_price, F.text)
 async def process_price_change(message: types.Message, state: FSMContext, session: AsyncSession):
-    """Обработка новой цены Обычного VPN."""
+    """Обработка новой цены подписки."""
     if not is_admin(message.from_user.id):
         await message.answer("❌ У вас нет прав")
         await state.clear()
@@ -116,60 +111,12 @@ async def process_price_change(message: types.Message, state: FSMContext, sessio
         await update_db_setting(session, "subscription_price", str(new_price), "Цена подписки в рублях")
 
         await message.answer(
-            text=f"✅ <b>Цена Обычного VPN изменена!</b>\n\n"
-                 f"Новая цена: {new_price}₽\n\n"
-                 "Цены на все тарифы автоматически обновлены.\n"
+            text=f"✅ <b>Цена подписки изменена!</b>\n\n"
+                 f"Новая цена: {new_price}₽/мес\n\n"
                  "Изменения вступят в силу сразу.",
             reply_markup=get_settings_keyboard()
         )
-        logger.info(f"Админ {message.from_user.id} изменил цену Обычного VPN на {new_price}₽")
-        await state.clear()
-
-    except ValueError:
-        await message.answer("❌ Неверный формат! Введите число.")
-        await state.clear()
-
-@router.callback_query(F.data == "edit_premium_price")
-async def edit_premium_price(callback: CallbackQuery, state: FSMContext):
-    """Начало редактирования цены VIP тарифа."""
-    if not is_admin(callback.from_user.id):
-        await callback.answer("❌ У вас нет прав", show_alert=True)
-        return
-
-    await callback.message.edit_text(
-        text="✏️ <b>Изменение цены VIP тарифа (Обход списков)</b>\n\n"
-             "Введите новую цену подписки (в рублях):\n\n"
-             "⚠️ После изменения цены автоматически обновятся\n"
-             "все тарифы (1, 3, 6, 12 месяцев).",
-        reply_markup=get_back_keyboard("settings_tariffs")
-    )
-    await state.set_state(SettingsStates.waiting_for_premium_price)
-    await callback.answer()
-
-@router.message(SettingsStates.waiting_for_premium_price, F.text)
-async def process_premium_price_change(message: types.Message, state: FSMContext, session: AsyncSession):
-    """Обработка новой цены VIP тарифа."""
-    if not is_admin(message.from_user.id):
-        await message.answer("❌ У вас нет прав")
-        await state.clear()
-        return
-
-    try:
-        new_price = float(message.text)
-        if new_price <= 0:
-            await message.answer("❌ Цена должна быть положительным числом!")
-            return
-
-        await update_db_setting(session, "premium_subscription_price", str(new_price), "Цена VIP подписки в рублях")
-
-        await message.answer(
-            text=f"✅ <b>Цена VIP тарифа изменена!</b>\n\n"
-                 f"Новая цена: {new_price}₽\n\n"
-                 "Цены на все тарифы автоматически обновлены.\n"
-                 "Изменения вступят в силу сразу.",
-            reply_markup=get_settings_keyboard()
-        )
-        logger.info(f"Админ {message.from_user.id} изменил цену VIP VPN на {new_price}₽")
+        logger.info(f"Админ {message.from_user.id} изменил цену подписки на {new_price}₽")
         await state.clear()
 
     except ValueError:

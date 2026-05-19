@@ -17,18 +17,18 @@ from keyboards.inline import (
 )
 from services.xui_api import xui_service as marzban_service
 from services.payment_crypto import crypto_bot_service
-from config import settings, get_db_setting, calculate_tariff_price
+from config import settings, get_db_setting
 
 router = Router(name="gift_router")
 
-# Цены подарочной подписки (как у обычной)
+# Цены подарочной подписки (единая подписка = оба конфига)
 GIFT_PRICES = {
-    "standard": {"1": 100, "3": 270, "6": 498, "12": 900},
-    "premium":  {"1": 300, "3": 810, "6": 1494, "12": 2700},
+    "standard": {"1": 700, "3": 1800, "6": 3000, "12": 5500},
+    "premium":  {"1": 700, "3": 1800, "6": 3000, "12": 5500},
 }
 
-# ГБ лимиты для подарков
-GIFT_GB = {"standard": 0, "premium": 100}
+# ГБ лимиты для подарков (БС инбаунд)
+GIFT_GB = {"standard": 100, "premium": 100}
 
 
 @router.callback_query(F.data == "gift_start")
@@ -82,8 +82,8 @@ async def gift_select_duration(callback: types.CallbackQuery, state: FSMContext,
     months = int(parts[3])
     days = months * 30
 
-    price = GIFT_PRICES.get(tier, GIFT_PRICES["standard"]).get(str(months), 100)
-    gb = GIFT_GB.get(tier, 0) * months if tier == "premium" else 0
+    price = GIFT_PRICES.get(tier, GIFT_PRICES["premium"]).get(str(months), 700)
+    gb = GIFT_GB.get(tier, 100) * months
 
     await state.update_data(gift_tier=tier, gift_months=months, gift_days=days, gift_price=price, gift_gb=gb)
 
@@ -92,7 +92,7 @@ async def gift_select_duration(callback: types.CallbackQuery, state: FSMContext,
     user = result.scalar_one_or_none()
     ref_balance = user.referral_balance if user else 0
 
-    tier_name = "🚀 VIP Обход белых списков" if tier == "premium" else "🛡 Обычный VPN"
+    tier_name = "🛡 NEMO VPN (Стандарт + Обход БС)"
     text = (
         f"🎁 <b>Подарочная подписка</b>\n\n"
         f"💎 Тариф: <b>{tier_name}</b>\n"

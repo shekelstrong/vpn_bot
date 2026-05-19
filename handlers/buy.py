@@ -28,7 +28,7 @@ from handlers.admin.notifications import (
     notify_admin_payment,
     notify_referrer_payment
 )
-from config import settings, get_db_setting, calculate_tariff_price
+from config import settings, get_db_setting
 from utils.states import BuySubscription
 
 router = Router()
@@ -63,19 +63,19 @@ async def traffic_buy_callback(callback: types.CallbackQuery, session: AsyncSess
             )
         return
 
-    # Докупка трафика доступна только для VIP-тарифа
-    if user.tier != "premium":
+    # Докупка трафика доступна всем с активной подпиской
+    if not has_subscription or not user.marzban_username:
         try:
             await callback.message.edit_text(
-                "ℹ️ <b>Докупка трафика доступна только для VIP-тарифа.</b>\n\n"
-                "У вас обычный VPN с безлимитным трафиком — докупать гигабайты не нужно! 🎉",
+                "❌ <b>Докупка трафика доступна только с активной подпиской.</b>\n\n"
+                "Сначала оформите подписку!",
                 reply_markup=get_back_keyboard("buy"),
                 parse_mode="HTML"
             )
         except:
             await callback.message.answer(
-                "ℹ️ <b>Докупка трафика доступна только для VIP-тарифа.</b>\n\n"
-                "У вас обычный VPN с безлимитным трафиком — докупать гигабайты не нужно! 🎉",
+                "❌ <b>Докупка трафика доступна только с активной подпиской.</b>\n\n"
+                "Сначала оформите подписку!",
                 reply_markup=get_back_keyboard("buy"),
                 parse_mode="HTML"
             )
@@ -100,7 +100,7 @@ async def traffic_select_package(callback: types.CallbackQuery, state: FSMContex
     # Парсим размер пакета
     gb = int(callback.data.replace("traffic_", ""))
     
-    TRAFFIC_PRICES = {50: 100, 100: 200, 300: 600, 500: 1000}
+    TRAFFIC_PRICES = {50: 200, 100: 400, 300: 1000, 500: 2000}
     price = TRAFFIC_PRICES.get(gb)
     
     if not price:
@@ -177,10 +177,10 @@ async def gift_select_duration(callback: types.CallbackQuery, state: FSMContext)
     tier = data.get("gift_tier", "premium")
     
     GIFT_PRICES = {
-        ("premium", 30): 400, ("premium", 90): 1050,
-        ("premium", 180): 1900, ("premium", 365): 3500,
-        ("standard", 30): 150, ("standard", 90): 400,
-        ("standard", 180): 700, ("standard", 365): 1200,
+        ("premium", 30): 700, ("premium", 90): 1800,
+        ("premium", 180): 3000, ("premium", 365): 5500,
+        ("standard", 30): 700, ("standard", 90): 1800,
+        ("standard", 180): 3000, ("standard", 365): 5500,
     }
     price = GIFT_PRICES.get((tier, days), 300)
     
@@ -275,7 +275,7 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
         if marzban_account_exists:
             gb_limit = 0
             if tier == "premium":
-                GB_MAP = {3: 3, 30: 100, 90: 350, 180: 800, 365: 2048}
+                GB_MAP = {3: 10, 30: 100, 90: 350, 180: 800, 365: 2048}
                 new_gb = GB_MAP.get(days, days * 3)
                 current_limit_gb = user.gb_limit or 0
                 if marzban_data:
@@ -290,7 +290,7 @@ async def process_manual_payment(bot, session: AsyncSession, payment_invoice: Pa
         else:
             gb_new = 0
             if tier == "premium":
-                GB_MAP = {3: 3, 30: 100, 90: 350, 180: 800, 365: 2048}
+                GB_MAP = {3: 10, 30: 100, 90: 350, 180: 800, 365: 2048}
                 gb_new = GB_MAP.get(days, days * 3)
                 user.gb_limit = gb_new
             new_acc = await marzban_service.create_user(
@@ -371,13 +371,14 @@ async def show_buy(callback_or_message: types.CallbackQuery | types.Message, sta
         text += "Новая подписка продлит текущую.\n\n"
 
     text += (
-        "🛡 <b>Выберите тип VPN-подписки:</b>\n\n"
-        "<b>Обычный VPN:</b>\n"
-        "Стандартный сервер для повседневных задач.\n\n"
-        "<b>🚀 Обход белых списков (VIP):</b>\n"
-        "Передовая связка на базе ядра Xray (XTLS-Reality + Vision). "
-        "Маскирует трафик под обычные запросы к разрешенным сайтам (Яндекс). "
-        "Идеально обходит ТСПУ и глубокий анализ пакетов (DPI) от Роскомнадзора."
+        "🛡 <b>NEMO VPN — единая подписка</b>\n\n"
+        "Покупая подписку, вы получаете <b>два конфига</b>:\n\n"
+        "🛡 <b>Стандартный</b> — иностранные сайты через VPN, "
+        "российские напрямую. Безлимитный трафик.\n\n"
+        "🔒 <b>Обход белых списков</b> — маскирует трафик под "
+        "обычные запросы к разрешённым сайтам (Яндекс). "
+        "Идеально обходит ТСПУ и DPI от Роскомнадзора. "
+        "Лимит трафика по тарифу."
     )
 
     # Кнопка "Докупить трафик" только для VIP с активной подпиской
@@ -413,19 +414,16 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
     await state.update_data(tier=tier)
     await callback.answer()
     
-    if tier == "premium":
-        base_price_str = await get_db_setting(session, "premium_subscription_price", str(settings.PREMIUM_PRICE_RUB))
-        price_test = 100
-    else:
-        base_price_str = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
-        price_test = 10
+    # Единая подписка — оба тарифа включены
+    base_price_str = await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB))
+    price_test = 200  # 3 дня тест
     
     base_price = float(base_price_str)
     
-    price_1m = await calculate_tariff_price(session, base_price, 1)
-    price_3m = await calculate_tariff_price(session, base_price, 3)
-    price_6m = await calculate_tariff_price(session, base_price, 6)
-    price_12m = await calculate_tariff_price(session, base_price, 12)
+    price_1m = int(base_price)
+    price_3m = 1500
+    price_6m = 2500
+    price_12m = 4500
 
     keyboard = get_subscription_duration_keyboard(
         tier=tier,
@@ -436,7 +434,7 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
         price_test=price_test
     )
 
-    tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+    tier_name = "🛡 NEMO VPN (Стандарт + Обход БС)"
     text = f"{tier_name}\n\n⏱ <b>Выберите срок подписки:</b>"
 
     try:
@@ -449,38 +447,33 @@ async def select_tier(callback: types.CallbackQuery, state: FSMContext, session:
 
 @router.callback_query(F.data.startswith("duration_"))
 async def select_duration(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-    """Выбор срока подписки."""
+    """Выбор срока подписки (фиксированные цены)."""
     duration = callback.data
     data = await state.get_data()
-    tier = data.get("tier", "standard")
-
-    if tier == "premium":
-        base_price = float(await get_db_setting(session, "premium_subscription_price", str(settings.PREMIUM_PRICE_RUB)))
-    else:
-        base_price = float(await get_db_setting(session, "subscription_price", str(settings.SUBSCRIPTION_PRICE_RUB)))
+    tier = data.get("tier", "premium")
 
     if duration == "duration_test3d":
         days = 3
-        price = 100 if tier == "premium" else 10
+        price = 200
     elif duration == "duration_1month":
         days = 30
-        price = await calculate_tariff_price(session, base_price, 1)
+        price = 500
     elif duration == "duration_3month":
         days = 90
-        price = await calculate_tariff_price(session, base_price, 3)
+        price = 1500
     elif duration == "duration_6month":
         days = 180
-        price = await calculate_tariff_price(session, base_price, 6)
+        price = 2500
     elif duration == "duration_12month":
         days = 365
-        price = await calculate_tariff_price(session, base_price, 12)
+        price = 4500
     else:
         await callback.answer("Неверный тариф", show_alert=True)
         return
 
     await state.update_data(days=days, price=int(price))
 
-    tier_name = "🚀 Обход белых списков (VIP)" if tier == "premium" else "🛡 Обычный VPN"
+    tier_name = "🛡 NEMO VPN (Стандарт + Обход БС)"
     
     text = (
         f"✅ <b>Выбран тариф:</b> {tier_name}\n\n"

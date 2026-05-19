@@ -171,17 +171,17 @@ def get_traffic_payment_keyboard(gb: int, price: int) -> InlineKeyboardMarkup:
 # ТАРИФЫ, ТРАФИК, ПОДАРКИ, АДМИНКА
 # =====================================================================
 
-def get_tier_selection_keyboard(has_subscription: bool = False, tier: str = "standard") -> InlineKeyboardMarkup:
+def get_tier_selection_keyboard(has_subscription: bool = False, tier: str = "premium") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🛡 Обычный VPN", callback_data="tier_standard", style="primary")
-    builder.button(text="🚀 Обход белых списков (VIP)", callback_data="tier_premium", style="primary")
-    if has_subscription and tier == "premium":
+    # Единая подписка — оба конфига
+    builder.button(text="🛡 NEMO VPN (Стандарт + Обход БС)", callback_data="tier_premium", style="primary")
+    if has_subscription:
         builder.button(text="📦 Докупить трафик", callback_data="traffic_buy", style="primary")
     builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
-    if has_subscription and tier == "premium":
-        builder.adjust(1, 1, 1, 1)
-    else:
+    if has_subscription:
         builder.adjust(1, 1, 1)
+    else:
+        builder.adjust(1, 1)
     return builder.as_markup()
 
 
@@ -194,18 +194,12 @@ def get_subscription_duration_keyboard(
     price_test: float
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    if tier == "premium":
-        builder.button(text=f"🥉 3 дня — {int(price_test)}₽ (3 ГБ)", callback_data="duration_test3d", style="primary")
-        builder.button(text=f"1 месяц — {int(price_1m)}₽ (100 ГБ)", callback_data="duration_1month", style="primary")
-        builder.button(text=f"3 месяца — {int(price_3m)}₽ (350 ГБ)", callback_data="duration_3month", style="primary")
-        builder.button(text=f"6 месяцев — {int(price_6m)}₽ (800 ГБ)", callback_data="duration_6month", style="primary")
-        builder.button(text=f"12 месяцев — {int(price_12m)}₽ (2 ТБ)", callback_data="duration_12month", style="primary")
-    else:
-        builder.button(text=f"🥉 3 дня — {int(price_test)}₽", callback_data="duration_test3d", style="primary")
-        builder.button(text=f"1 месяц — {int(price_1m)}₽ ♾️", callback_data="duration_1month", style="primary")
-        builder.button(text=f"3 месяца — {int(price_3m)}₽ ♾️", callback_data="duration_3month", style="primary")
-        builder.button(text=f"6 месяцев — {int(price_6m)}₽ ♾️", callback_data="duration_6month", style="primary")
-        builder.button(text=f"12 месяцев — {int(price_12m)}₽ ♾️", callback_data="duration_12month", style="primary")
+    # Единая подписка — оба конфига (Стандарт безлимит + БС с лимитом)
+    builder.button(text=f"🥉 3 дня — {int(price_test)}₽ (10 ГБ)", callback_data="duration_test3d", style="primary")
+    builder.button(text=f"1 месяц — {int(price_1m)}₽ (100 ГБ)", callback_data="duration_1month", style="primary")
+    builder.button(text=f"3 месяца — {int(price_3m)}₽ (350 ГБ)", callback_data="duration_3month", style="primary")
+    builder.button(text=f"6 месяцев — {int(price_6m)}₽ (800 ГБ)", callback_data="duration_6month", style="primary")
+    builder.button(text=f"12 месяцев — {int(price_12m)}₽ (2 ТБ)", callback_data="duration_12month", style="primary")
     builder.button(text="Назад ↩️", callback_data="buy", style="danger")
     builder.adjust(1, 1, 1, 1, 1, 1)
     return builder.as_markup()
@@ -213,10 +207,10 @@ def get_subscription_duration_keyboard(
 
 def get_traffic_buy_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="50 ГБ — 100₽", callback_data="traffic_50", style="primary")
-    builder.button(text="100 ГБ — 200₽", callback_data="traffic_100", style="primary")
-    builder.button(text="300 ГБ — 600₽", callback_data="traffic_300", style="primary")
-    builder.button(text="500 ГБ — 1000₽", callback_data="traffic_500", style="primary")
+    builder.button(text="50 ГБ — 200₽", callback_data="traffic_50", style="primary")
+    builder.button(text="100 ГБ — 400₽", callback_data="traffic_100", style="primary")
+    builder.button(text="300 ГБ — 1000₽", callback_data="traffic_300", style="primary")
+    builder.button(text="500 ГБ — 2000₽", callback_data="traffic_500", style="primary")
     builder.button(text="Назад ↩️", callback_data="buy", style="danger")
     builder.adjust(1, 1, 1, 1, 1)
     return builder.as_markup()
@@ -224,25 +218,19 @@ def get_traffic_buy_keyboard() -> InlineKeyboardMarkup:
 
 def get_gift_tier_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="🛡 Обычный VPN — 150₽/мес", callback_data="gift_standard", style="primary")
-    builder.button(text="🚀 VIP (Обход белых списков) — от 400₽/мес", callback_data="gift_premium", style="primary")
+    builder.button(text="🛡 NEMO VPN — от 700₽/мес (оба конфига)", callback_data="gift_premium", style="primary")
     builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
-    builder.adjust(1, 1, 1)
+    builder.adjust(1, 1)
     return builder.as_markup()
 
 
 def get_gift_duration_keyboard(tier: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    if tier == "premium":
-        builder.button(text="1 месяц — 400₽ (100 ГБ)", callback_data="gift_dur_30", style="primary")
-        builder.button(text="3 месяца — 1050₽ (350 ГБ)", callback_data="gift_dur_90", style="primary")
-        builder.button(text="6 месяцев — 1900₽ (800 ГБ)", callback_data="gift_dur_180", style="primary")
-        builder.button(text="12 месяцев — 3500₽ (2 ТБ)", callback_data="gift_dur_365", style="primary")
-    else:
-        builder.button(text="1 месяц — 150₽ ♾️", callback_data="gift_dur_30", style="primary")
-        builder.button(text="3 месяца — 400₽ ♾️", callback_data="gift_dur_90", style="primary")
-        builder.button(text="6 месяцев — 700₽ ♾️", callback_data="gift_dur_180", style="primary")
-        builder.button(text="12 месяцев — 1200₽ ♾️", callback_data="gift_dur_365", style="primary")
+    # Единая подписка — оба конфига
+    builder.button(text="1 месяц — 700₽ (100 ГБ)", callback_data="gift_dur_premium_1", style="primary")
+    builder.button(text="3 месяца — 1800₽ (350 ГБ)", callback_data="gift_dur_premium_3", style="primary")
+    builder.button(text="6 месяцев — 3000₽ (800 ГБ)", callback_data="gift_dur_premium_6", style="primary")
+    builder.button(text="12 месяцев — 5500₽ (2 ТБ)", callback_data="gift_dur_premium_12", style="primary")
     builder.button(text="Назад ↩️", callback_data="gift_start", style="danger")
     builder.adjust(1, 1, 1, 1, 1)
     return builder.as_markup()
@@ -259,9 +247,8 @@ def get_gift_payment_keyboard(tier: str, days: int, price: int) -> InlineKeyboar
 
 def get_admin_settings_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="💵 Цена Обычного ВПН", callback_data="set_price_standard", style="primary")
-    builder.button(text="💎 Цена Обхода списков", callback_data="set_price_premium", style="primary")
+    builder.button(text="💵 Цена подписки", callback_data="set_price_standard", style="primary")
     builder.button(text="⏳ Настроить скидки", callback_data="set_discounts", style="primary")
     builder.button(text="🔙 Назад", callback_data="admin_panel", style="danger")
-    builder.adjust(1, 1, 1, 1)
+    builder.adjust(1, 1, 1)
     return builder.as_markup()

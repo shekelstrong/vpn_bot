@@ -13,7 +13,7 @@ from loguru import logger
 from database.models import User, Transaction
 from keyboards.inline import get_tier_selection_keyboard, get_subscription_duration_keyboard, get_buy_keyboard
 from services.xui_api import xui_service as marzban_service
-from config import settings, get_db_setting, calculate_tariff_price
+from config import settings, get_db_setting
 
 router = Router(name="referral_buy_router")
 
@@ -95,7 +95,7 @@ async def pay_from_referral(callback: types.CallbackQuery, state: FSMContext, se
     session.add(tx)
     await session.commit()
 
-    tier_name = "🚀 VIP Обход белых списков" if tier == "premium" else "🛡 Обычный VPN"
+    tier_name = "🛡 NEMO VPN (Стандарт + Обход БС)"
     await callback.message.edit_text(
         f"✅ <b>Оплата с баланса прошла успешно!</b>\n\n"
         f"💎 Тариф: <b>{tier_name}</b>\n"
