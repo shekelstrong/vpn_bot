@@ -46,25 +46,7 @@ async def traffic_buy_callback(callback: types.CallbackQuery, session: AsyncSess
     result = await session.execute(select(User).where(User.user_id == callback.from_user.id))
     user = result.scalar_one_or_none()
     
-    if not user or not user.marzban_username:
-        try:
-            await callback.message.edit_text(
-                "❌ <b>Докупка трафика доступна только с активной подпиской.</b>\n\n"
-                "Сначала оформите подписку!",
-                reply_markup=get_back_keyboard("buy"),
-                parse_mode="HTML"
-            )
-        except:
-            await callback.message.answer(
-                "❌ <b>Докупка трафика доступна только с активной подпиской.</b>\n\n"
-                "Сначала оформите подписку!",
-                reply_markup=get_back_keyboard("buy"),
-                parse_mode="HTML"
-            )
-        return
-
-    # Докупка трафика доступна всем с активной подпиской
-    if not has_subscription or not user.marzban_username:
+    if not user or not user.expire_date or user.expire_date <= datetime.utcnow():
         try:
             await callback.message.edit_text(
                 "❌ <b>Докупка трафика доступна только с активной подпиской.</b>\n\n"
@@ -172,9 +154,16 @@ async def gift_select_duration(callback: types.CallbackQuery, state: FSMContext)
     """Обработка выбора срока подарка."""
     await callback.answer()
     
-    days = int(callback.data.replace("gift_dur_", ""))
+    # Parse callback: gift_dur_premium_1, gift_dur_standard_3, etc.
+    raw = callback.data.replace("gift_dur_", "")
+    if "_" in raw:
+        tier, num = raw.rsplit("_", 1)
+        days_map = {"1": 30, "3": 90, "6": 180, "12": 365}
+        days = days_map.get(num, int(num) * 30)
+    else:
+        days = int(raw)
+        tier = "premium"
     data = await state.get_data()
-    tier = data.get("gift_tier", "premium")
     
     GIFT_PRICES = {
         ("premium", 30): 700, ("premium", 90): 1800,
@@ -632,7 +621,7 @@ async def pay_crypto(callback: types.CallbackQuery, state: FSMContext, session: 
 
     # Стандартная оплата подписки
     price_rub = data.get("price", settings.SUBSCRIPTION_PRICE_RUB)
-    days = data.get("days", settings.SUBSCRIPTION_EXPIRE_DAYS)
+    days = data.get("days", 30)
     tier = data.get("tier", "standard")
     
     await callback.answer("⏳ Создание счета...")
@@ -824,7 +813,7 @@ async def pay_card(callback: types.CallbackQuery, state: FSMContext, session: As
 
     # Стандартная оплата подписки
     price = data.get("price", settings.SUBSCRIPTION_PRICE_RUB)
-    days = data.get("days", settings.SUBSCRIPTION_EXPIRE_DAYS)
+    days = data.get("days", 30)
     tier = data.get("tier", "standard")
     
     await callback.answer("⏳ Создание счета...")
