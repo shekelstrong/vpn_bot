@@ -46,6 +46,7 @@ from handlers.traffic_buy import router as traffic_buy_router
 from handlers.gift import router as gift_router
 from handlers.referral_buy import router as referral_buy_router
 from handlers.vk_link import link_router
+from handlers.dpi_check import router as dpi_router
 
 from services.crypto_bot_v2 import crypto_bot_v2_service
 from services.crypto_webhook import handle_crypto_webhook_update
@@ -113,6 +114,7 @@ dp.include_router(referrals_router)
 dp.include_router(traffic_buy_router)
 dp.include_router(gift_router)
 dp.include_router(referral_buy_router)
+dp.include_router(dpi_router)
 
 dp.include_router(link_router)
 

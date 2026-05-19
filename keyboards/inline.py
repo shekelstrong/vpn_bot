@@ -74,13 +74,14 @@ def get_trial_keyboard() -> InlineKeyboardMarkup:
 def get_help_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Как настроить Happ 📱", callback_data="help_happ", style="primary")
+    builder.button(text="🔍 DPI-чекер", callback_data="dpi_check", style="primary")
     builder.button(text="Частые вопросы ❓", callback_data="help_faq", style="primary")
     builder.button(text="Реферальная программа 👥", callback_data="referral", style="primary")
     builder.button(text="Техподдержка 💬", callback_data="help_support", style="primary")
     builder.button(text="Политика конфиденциальности 📜", url="https://telegra.ph/Politika-konfidencialnosti-04-01-26")
     builder.button(text="Пользовательское соглашение 📝", url="https://telegra.ph/Polzovatelskoe-soglashenie-04-01-19")
     builder.button(text="Назад ↩️", callback_data="back_to_main", style="danger")
-    builder.adjust(1)
+    builder.adjust(1, 1, 1, 1, 1, 1, 1)
     return builder.as_markup()
 
 
