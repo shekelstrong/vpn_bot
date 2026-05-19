@@ -51,13 +51,19 @@ async def pay_from_referral(callback: types.CallbackQuery, state: FSMContext, se
         user.balance = 0.0
         user.referral_balance -= remaining
 
-    # Продлеваем подписку
+    # Продлеваем подписку (раздельные сроки)
     now = datetime.utcnow()
-    if user.expire_date and user.expire_date > now:
-        user.expire_date = user.expire_date + timedelta(days=days)
+    if tier == "premium":
+        if user.expire_premium and user.expire_premium > now:
+            user.expire_premium = user.expire_premium + timedelta(days=days)
+        else:
+            user.expire_premium = now + timedelta(days=days)
     else:
-        user.expire_date = now + timedelta(days=days)
-
+        if user.expire_standard and user.expire_standard > now:
+            user.expire_standard = user.expire_standard + timedelta(days=days)
+        else:
+            user.expire_standard = now + timedelta(days=days)
+    user.recalculate_expire_date()
     user.tier = tier
 
     # Marzban

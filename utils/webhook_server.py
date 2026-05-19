@@ -1586,9 +1586,9 @@ async def run_webhooks(bot=None):
     runner = web.AppRunner(app)
     await runner.setup()
     
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    site = web.TCPSite(runner, '0.0.0.0', settings.WEB_PORT)
     await site.start()
     
     logger.info("=" * 50)
-    logger.info("Вебхук-сервер Nemo VPN запущен (Порт 8080) с поддержкой Mini App API!")
+    logger.info("Вебхук-сервер Nemo VPN запущен (Порт {settings.WEB_PORT}) с поддержкой Mini App API!")
     logger.info("=" * 50)

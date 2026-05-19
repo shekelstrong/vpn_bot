@@ -279,9 +279,14 @@ async def process_gift_activation(message: Message, session: AsyncSession, bot: 
         else:
             user.expire_standard = now + timedelta(days=gift.days)
     user.recalculate_expire_date()
-    user.tier = gift.tier
+    # Не понижаем тариф — premium остаётся premium
+    if gift.tier == "premium":
+        user.tier = "premium"
+    elif user.tier not in ("premium",):
+        user.tier = gift.tier
     if gift.gb_limit > 0:
         current_gb = user.gb_limit or 0
+        # Добавляем к текущему лимиту, а не заменяем
         user.gb_limit = current_gb + gift.gb_limit
 
     # Marzban

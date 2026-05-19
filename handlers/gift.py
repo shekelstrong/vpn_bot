@@ -55,7 +55,7 @@ async def show_gift_start(callback_or_message: types.CallbackQuery | types.Messa
         await message.edit_text(text=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception:
         await message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
-    await state.set_state("gift_selecting_tier")
+    await state.set_state("gift_select_tier")
 
 
 @router.callback_query(F.data.startswith("gift_tier_"))
@@ -71,7 +71,7 @@ async def gift_select_tier(callback: types.CallbackQuery, state: FSMContext, ses
     except Exception:
         await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
-    await state.set_state("gift_selecting_duration")
+    await state.set_state("gift_select_duration")
 
 
 @router.callback_query(F.data.startswith("gift_dur_"))
@@ -108,7 +108,7 @@ async def gift_select_duration(callback: types.CallbackQuery, state: FSMContext,
     except Exception:
         await callback.message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
-    await state.set_state("gift_selecting_payment")
+    await state.set_state("gift_select_payment")
 
 
 @router.callback_query(F.data == "gift_pay_crypto")

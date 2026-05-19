@@ -425,13 +425,17 @@ async def process_gift_days(message: types.Message, state: FSMContext, session: 
             await state.clear()
             return
         
-        # Продлеваем подписку
-        if user.expire_date and user.expire_date > datetime.utcnow():
-            new_expire = user.expire_date + timedelta(days=days)
+        # Продлеваем подписку (раздельные сроки)
+        now = datetime.utcnow()
+        if user.expire_premium and user.expire_premium > now:
+            user.expire_premium = user.expire_premium + timedelta(days=days)
         else:
-            new_expire = datetime.utcnow() + timedelta(days=days)
-        
-        user.expire_date = new_expire
+            user.expire_premium = now + timedelta(days=days)
+        if user.expire_standard and user.expire_standard > now:
+            user.expire_standard = user.expire_standard + timedelta(days=days)
+        else:
+            user.expire_standard = now + timedelta(days=days)
+        user.recalculate_expire_date()
         
         # Если есть Marzban пользователь, продлеваем там
         if user.marzban_username:
@@ -450,7 +454,7 @@ async def process_gift_days(message: types.Message, state: FSMContext, session: 
             f"✅ Подписка продлена!\n\n"
             f"Пользователь: <code>{gift_user_id}</code>\n"
             f"Дней: {days}\n"
-            f"Новая дата истечения: {new_expire.strftime('%d.%m.%Y %H:%M')}"
+            f"Новая дата истечения: {user.expire_date.strftime('%d.%m.%Y %H:%M')}"
         )
         
         # Уведомляем пользователя
@@ -460,7 +464,7 @@ async def process_gift_days(message: types.Message, state: FSMContext, session: 
                 text=(
                     f"🎁 <b>Вам подарена подписка!</b>\n\n"
                     f"Администратор добавил {days} дней к вашей подписке.\n\n"
-                    f"Новая дата истечения: {new_expire.strftime('%d.%m.%Y %H:%M')}\n\n"
+                    f"Новая дата истечения: {user.expire_date.strftime('%d.%m.%Y %H:%M')}\n\n"
                     f"Спасибо за использование Nemo VPN! 💙"
                 ),
             )

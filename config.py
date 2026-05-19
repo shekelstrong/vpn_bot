@@ -50,8 +50,8 @@ class Settings(BaseSettings):
 
     # Marzban API (устаревшее, для совместимости)
     MARZBAN_URL: str = Field(default="https://your-marzban-url.com", description="URL Marzban панели (deprecated)")
-    MARZBAN_ADMIN_USERNAME: str = Field(..., description="Логин администратора Marzban (deprecated)")
-    MARZBAN_ADMIN_PASSWORD: str = Field(..., description="Пароль администратора Marzban (deprecated)")
+    MARZBAN_ADMIN_USERNAME: str = Field(default="deprecated", description="Логин администратора Marzban (deprecated)")
+    MARZBAN_ADMIN_PASSWORD: str = Field(default="deprecated", description="Пароль администратора Marzban (deprecated)")
 
     # Database
     DATABASE_URL: str = Field(
