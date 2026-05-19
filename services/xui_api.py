@@ -122,8 +122,54 @@ class XUIService:
             raise Exception(f"Не удалось получить inbound {inbound_id}: {result.get('msg')}")
         return result["obj"]
 
-    async def _update_inbound(self, inbound_id: int, inbound_obj: Dict[str, Any]) -> bool:
-        """Обновить inbound (список клиентов и настройки)."""
+    async def _add_client(self, inbound_id: int, client_data: Dict[str, Any]) -> bool:
+        """Добавить клиента через /addClient (безопасно, не ломает inbound)."""
+        result = await self._request(
+            "POST", "inbounds/addClient",
+            json_data={"id": inbound_id, "settings": json.dumps({"clients": [client_data]})},
+        )
+        success = result.get("success", False)
+        if not success:
+            logger.error(f"Ошибка addClient inbound {inbound_id}: {result.get('msg')}")
+        return success
+
+    async def _del_client(self, inbound_id: int, client_uuid: str) -> bool:
+        """Удалить клиента через /{inbound_id}/delClient/{uuid}."""
+        result = await self._request(
+            "POST", f"inbounds/{inbound_id}/delClient/{client_uuid}"
+        )
+        success = result.get("success", False)
+        if not success:
+            logger.warning(f"Ошибка delClient {client_uuid} from inbound {inbound_id}: {result.get('msg')}")
+        return success
+
+    async def _update_inbound_safe(self, inbound_id: int, inbound_obj: Dict[str, Any]) -> bool:
+        """
+        Безопасное обновление inbound — ПРОВЕРЯЕТ критические поля перед отправкой.
+        
+        ⚠️  3x-ui /update/{id} ОПАСЕН: если отправить неполный объект,
+        он ПЕРЕЗАПИШЕТ inbound дефолтами (port=0, enable=false, settings=пусто).
+        Этот метод проверяет что port > 0, enable=True, settings непустой.
+        """
+        # Критические проверки
+        port = inbound_obj.get("port", 0)
+        enable = inbound_obj.get("enable", False)
+        settings_raw = inbound_obj.get("settings", "")
+        remark = inbound_obj.get("remark", "")
+
+        if not port or port == 0:
+            logger.error(f"БЛОКИРОВКА: попытка обновить inbound {inbound_id} с port={port}!")
+            return False
+        if not enable:
+            logger.error(f"БЛОКИРОВКА: попытка обновить inbound {inbound_id} с enable=False!")
+            return False
+        if not settings_raw or len(settings_raw) < 10:
+            logger.error(f"БЛОКИРОВКА: попытка обновить inbound {inbound_id} с пустым settings!")
+            return False
+        if not remark:
+            logger.error(f"БЛОКИРОВКА: попытка обновить inbound {inbound_id} с пустым remark!")
+            return False
+
         result = await self._request("POST", f"inbounds/update/{inbound_id}", json_data=inbound_obj)
         success = result.get("success", False)
         if not success:
@@ -181,21 +227,14 @@ class XUIService:
         total_gb_premium = int(data_limit_gb) if data_limit_gb > 0 else 0
 
         # --- Inbound 1 (Standard: безлимит, без expiry/totalGB в клиенте) ---
-        ib1 = await self._get_inbound(INBOUND_STANDARD)
-        settings1 = json.loads(ib1["settings"])
         client_std = {
             "id": client_uuid,
             "email": client_email,
             "flow": "xtls-rprx-vision",
             "subId": sub_id_std,
-            "created_at": int(datetime.utcnow().timestamp() * 1000),
         }
-        settings1["clients"].append(client_std)
-        ib1["settings"] = json.dumps(settings1)
 
         # --- Inbound 2 (Premium: лимит, expiry, limitIp) ---
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
         client_wl = {
             "id": client_uuid,
             "email": f"{client_email}-wl",
@@ -205,15 +244,11 @@ class XUIService:
             "totalGB": total_gb_premium,
             "expiryTime": expiry_ms,
             "subId": sub_id_wl,
-            "created_at": int(datetime.utcnow().timestamp() * 1000),
-            "updated_at": 0,
         }
-        settings2["clients"].append(client_wl)
-        ib2["settings"] = json.dumps(settings2)
 
-        # Сохраняем оба inbound'а
-        ok1 = await self._update_inbound(INBOUND_STANDARD, ib1)
-        ok2 = await self._update_inbound(INBOUND_PREMIUM, ib2)
+        # Добавляем клиентов через безопасный /addClient (НЕ ломает inbound)
+        ok1 = await self._add_client(INBOUND_STANDARD, client_std)
+        ok2 = await self._add_client(INBOUND_PREMIUM, client_wl)
 
         if not (ok1 and ok2):
             raise Exception(f"Не удалось создать клиента: standard={ok1}, premium={ok2}")
@@ -362,7 +397,7 @@ class XUIService:
         client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
         ib2["settings"] = json.dumps(settings2)
-        ok = await self._update_inbound(INBOUND_PREMIUM, ib2)
+        ok = await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         if not ok:
             raise Exception(f"Не удалось продлить подписку {client_email}")
@@ -393,7 +428,7 @@ class XUIService:
         client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
         ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound(INBOUND_PREMIUM, ib2)
+        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         logger.info(f"Лёгкое продление {client_email}: +{extra_days} дней")
         return await self.get_user(client_email)
@@ -413,7 +448,7 @@ class XUIService:
         client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
         ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound(INBOUND_PREMIUM, ib2)
+        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         logger.info(f"Обновлен limitIp для {client_email}: {device_count}")
         return await self.get_user(client_email)
@@ -433,7 +468,7 @@ class XUIService:
         client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
         ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound(INBOUND_PREMIUM, ib2)
+        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         logger.info(f"Обновлен лимит трафика {client_email}: {data_limit_gb} ГБ")
         return await self.get_user(client_email)
@@ -458,7 +493,7 @@ class XUIService:
         client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
         ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound(INBOUND_PREMIUM, ib2)
+        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         logger.info(f"Докупка трафика {client_email}: +{extra_gb} ГБ (итого: {client_wl['totalGB']} ГБ)")
         return await self.get_user(client_email)
@@ -506,7 +541,7 @@ class XUIService:
         client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
         ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound(INBOUND_PREMIUM, ib2)
+        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         logger.info(
             f"Полное обновление {client_email}: +{extra_days}д, "
@@ -547,7 +582,7 @@ class XUIService:
             # Удаляем из Standard
             settings1["clients"] = [c for c in settings1["clients"] if c.get("id") != client_uuid]
             ib1["settings"] = json.dumps(settings1)
-            await self._update_inbound(INBOUND_STANDARD, ib1)
+            await self._update_inbound_safe(INBOUND_STANDARD, ib1)
         elif has_standard and not client_std:
             # Добавляем обратно в Standard
             client_new_std = {
@@ -559,7 +594,7 @@ class XUIService:
             }
             settings1["clients"].append(client_new_std)
             ib1["settings"] = json.dumps(settings1)
-            await self._update_inbound(INBOUND_STANDARD, ib1)
+            await self._update_inbound_safe(INBOUND_STANDARD, ib1)
 
         # Управляем Premium inbound
         ib2 = await self._get_inbound(INBOUND_PREMIUM)
@@ -570,7 +605,7 @@ class XUIService:
             # Удаляем из Premium
             settings2["clients"] = [c for c in settings2["clients"] if c.get("id") != client_uuid]
             ib2["settings"] = json.dumps(settings2)
-            await self._update_inbound(INBOUND_PREMIUM, ib2)
+            await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
         elif has_premium and not client_wl:
             # Добавляем в Premium
             client_new_wl = {
@@ -587,7 +622,7 @@ class XUIService:
             }
             settings2["clients"].append(client_new_wl)
             ib2["settings"] = json.dumps(settings2)
-            await self._update_inbound(INBOUND_PREMIUM, ib2)
+            await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         active = []
         if has_standard:
@@ -610,7 +645,7 @@ class XUIService:
             client_uuid = client_std.get("id")
             settings1["clients"] = [c for c in settings1["clients"] if c.get("id") != client_uuid]
             ib1["settings"] = json.dumps(settings1)
-            await self._update_inbound(INBOUND_STANDARD, ib1)
+            await self._update_inbound_safe(INBOUND_STANDARD, ib1)
 
         # Premium inbound
         ib2 = await self._get_inbound(INBOUND_PREMIUM)
@@ -620,7 +655,7 @@ class XUIService:
         else:
             settings2["clients"] = [c for c in settings2["clients"] if c.get("email") != f"{client_email}-wl"]
         ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound(INBOUND_PREMIUM, ib2)
+        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         logger.info(f"Удален пользователь {client_email}")
 
@@ -638,7 +673,7 @@ class XUIService:
         if client_std:
             client_std["subId"] = new_sub_id
             ib1["settings"] = json.dumps(settings1)
-            await self._update_inbound(INBOUND_STANDARD, ib1)
+            await self._update_inbound_safe(INBOUND_STANDARD, ib1)
 
         # Premium: обновляем subId
         ib2 = await self._get_inbound(INBOUND_PREMIUM)
@@ -647,7 +682,7 @@ class XUIService:
         if client_wl:
             client_wl["subId"] = new_sub_id_wl
             ib2["settings"] = json.dumps(settings2)
-            await self._update_inbound(INBOUND_PREMIUM, ib2)
+            await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
 
         logger.info(f"Отозвана подписка {client_email} (новые subId)")
         return await self.get_user(client_email)
