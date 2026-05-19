@@ -277,6 +277,51 @@ class WebhookHandler:
             logger.error(f"API regenerate_key error: {e}")
             return web.json_response({"error": str(e)}, status=500)
 
+    async def api_register_guest(self, request: web.Request) -> web.Response:
+        """Регистрация гостевого пользователя (покупка без Telegram)."""
+        import uuid
+        try:
+            data = await request.json()
+            email = data.get("email", "").strip()
+            
+            # Создаём фиктивный tg_id для гостя (отрицательный, чтобы не пересекаться)
+            guest_uuid = uuid.uuid4().hex[:8]
+            guest_tg_id = -(abs(hash(guest_uuid)) % 10**9)  # отрицательный ID
+            
+            async with get_session_factory()() as session:
+                # Проверяем нет ли уже такого пользователя
+                result = await session.execute(select(User).where(User.user_id == guest_tg_id))
+                existing = result.scalar_one_or_none()
+                if existing:
+                    # Возвращаем существующего
+                    sub_url = existing.sub_url or ""
+                    return web.json_response({
+                        "status": "success",
+                        "user_id": existing.user_id,
+                        "sub_url": sub_url,
+                    })
+                
+                # Создаём нового гостевого пользователя
+                user = User(
+                    user_id=guest_tg_id,
+                    username=f"guest_{guest_uuid}",
+                    email=email or "",
+                    tier="standard",
+                    referral_balance=0,
+                )
+                session.add(user)
+                await session.commit()
+                
+                logger.info(f"Зарегистрирован гостевой пользователь: {guest_tg_id}")
+                return web.json_response({
+                    "status": "success",
+                    "user_id": guest_tg_id,
+                    "sub_url": "",
+                })
+        except Exception as e:
+            logger.error(f"API register_guest error: {e}")
+            return web.json_response({"error": str(e)}, status=500)
+
     async def handle_pay_success(self, request: web.Request) -> web.Response:
         return web.Response(text="Оплата успешно завершена! Вы можете вернуться в бота.", content_type='text/html')
 
@@ -1537,6 +1582,7 @@ async def run_webhooks(bot=None):
     app.router.add_post('/api/create_gift', handler.api_create_gift)
     app.router.add_post('/api/pay_referral', handler.api_pay_referral)
     app.router.add_post('/api/regenerate_key', handler.api_regenerate_key)
+    app.router.add_post('/api/register_guest', handler.api_register_guest)
     # ============================================
 
     runner = web.AppRunner(app)
