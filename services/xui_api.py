@@ -247,46 +247,22 @@ class XUIService:
         }
 
         # Добавляем клиентов через безопасный /addClient (НЕ ломает inbound)
-        # Но если клиент уже существует (повторная подписка), нужно обновить через inbound update
+        # Если клиент уже существует (Duplicate email) — считаем успехом, не обновляем
         ok1 = await self._add_client(INBOUND_STANDARD, client_std)
         ok2 = await self._add_client(INBOUND_PREMIUM, client_wl)
 
-        # Если addClient не удался из-за дубликата email — обновляем существующего
-        if not ok1 or not ok2:
-            logger.warning(f"addClient не удался для {client_email}, пробуем обновить существующего")
-            if not ok1:
-                ib1 = await self._get_inbound(INBOUND_STANDARD)
-                settings1 = json.loads(ib1["settings"])
-                existing_std = self._find_client_by_email(settings1["clients"], client_email)
-                if not existing_std:
-                    # Клиент не найден — создаём с другим UUID
-                    client_uuid_new = str(uuid_mod.uuid4())
-                    client_std["id"] = client_uuid_new
-                    client_wl["id"] = client_uuid_new
-                    client_uuid = client_uuid_new
-                    ok1 = await self._add_client(INBOUND_STANDARD, client_std)
-                else:
-                    # Обновляем subId у существующего
-                    existing_std["subId"] = sub_id
-                    ib1["settings"] = json.dumps(settings1)
-                    ok1 = await self._update_inbound_safe(INBOUND_STANDARD, ib1)
+        # Если addClient не удался из-за дубликата email — клиент уже существует
+        if not ok1:
+            existing1 = await self._find_client_in_inbound(INBOUND_STANDARD, client_email)
+            ok1 = existing1 is not None
+            if existing1:
+                logger.info(f"Клиент {client_email} уже есть в Standard inbound, пропускаем")
 
-            if not ok2:
-                ib2 = await self._get_inbound(INBOUND_PREMIUM)
-                settings2 = json.loads(ib2["settings"])
-                existing_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
-                if not existing_wl:
-                    client_wl["id"] = client_uuid
-                    ok2 = await self._add_client(INBOUND_PREMIUM, client_wl)
-                else:
-                    # Обновляем параметры Premium клиента
-                    existing_wl["expiryTime"] = expiry_ms
-                    existing_wl["totalGB"] = total_gb_premium
-                    existing_wl["enable"] = True
-                    existing_wl["subId"] = sub_id
-                    existing_wl["limitIp"] = device_count
-                    ib2["settings"] = json.dumps(settings2)
-                    ok2 = await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
+        if not ok2:
+            existing2 = await self._find_client_in_inbound(INBOUND_PREMIUM, f"{client_email}-wl")
+            ok2 = existing2 is not None
+            if existing2:
+                logger.info(f"Клиент {client_email}-wl уже есть в Premium inbound, пропускаем")
 
         if not (ok1 and ok2):
             raise Exception(f"Не удалось создать клиента: standard={ok1}, premium={ok2}")
@@ -377,6 +353,13 @@ class XUIService:
             return None
 
         return result_data
+
+    async def _find_client_in_inbound(self, inbound_id: int, email: str) -> Optional[Dict]:
+        """Найти клиента по email в указанном inbound."""
+        await self._ensure_login()
+        ib = await self._get_inbound(inbound_id)
+        settings = json.loads(ib["settings"])
+        return self._find_client_by_email(settings.get("clients", []), email)
 
     async def _get_client_traffic(self, inbound_id: int, email: str) -> int:
         """Получить использованный трафик клиента (up + down) из clientStats."""

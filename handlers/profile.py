@@ -430,21 +430,26 @@ async def show_subscription(callback_or_message, session: AsyncSession):
             marzban_data = await marzban_service.get_user(user.marzban_username)
 
             if not marzban_data:
-                # Клиента нет в 3x-ui — создаём
+                # Клиента нет в 3x-ui — создаём только если реально не найден
                 now = datetime.utcnow()
-                # Определяем оставшиеся дни
                 days_left = max(1, (user.expire_date - now).days) if user.expire_date else 30
-                # Определяем data_limit из базы
                 gb_limit = (user.gb_limit or 0)
 
-                marzban_data = await marzban_service.create_user(
-                    tg_id=user_id,
-                    username=user.username,
-                    expire_days=days_left,
-                    data_limit_gb=gb_limit,
-                )
-                user.marzban_username = marzban_data.get("username", f"tg_{user_id}")
-                await session.commit()
+                try:
+                    marzban_data = await marzban_service.create_user(
+                        tg_id=user_id,
+                        username=user.username,
+                        expire_days=days_left,
+                        data_limit_gb=gb_limit,
+                    )
+                    user.marzban_username = marzban_data.get("username", f"tg_{user_id}")
+                    await session.commit()
+                except Exception as create_err:
+                    logger.warning(f"create_user failed for {user_id} (may already exist): {create_err}")
+                    # Повторный запрос — клиент может уже существовать
+                    marzban_data = await marzban_service.get_user(user.marzban_username)
+                    if not marzban_data:
+                        raise create_err
 
             # Получаем ссылку на подписку через sub-service
             subscription_url = await marzban_service.get_user_subscription(user.marzban_username)
@@ -463,7 +468,7 @@ async def show_subscription(callback_or_message, session: AsyncSession):
                     "❌ Не удалось получить ссылку. Обратитесь в поддержку."
                 )
         except Exception as e:
-            logger.error(f"Ошибка получения ссылки для {user_id}: {e}")
+            logger.error(f"Ошибка получения ссылки для {user_id}: {e}", exc_info=True)
             await message.answer("❌ Ошибка. Попробуйте позже.")
     else:
         price = await get_db_setting(
