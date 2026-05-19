@@ -36,10 +36,19 @@ async def _ensure_user_for_webhook(session, tg_id: int) -> User:
         await marzban_service._ensure_login()
         for _inbound_id in (1, 2):
             inbound_data = await marzban_service._get_inbound(_inbound_id)
-            for client in inbound_data.get("settings", {}).get("clients", []):
+            # 3x-ui returns settings as JSON string, must parse first
+            settings_raw = inbound_data.get("settings", "{}")
+            if isinstance(settings_raw, str):
+                try:
+                    settings_obj = json.loads(settings_raw)
+                except (json.JSONDecodeError, TypeError):
+                    settings_obj = {}
+            else:
+                settings_obj = settings_raw
+            for client in settings_obj.get("clients", []):
                 email = client.get("email", "")
-                if email.startswith(f"user_{tg_id}_") or email.startswith(f"tg_{tg_id}_"):
-                    marzban_username = email
+                if email == f"tg_{tg_id}" or email.startswith(f"user_{tg_id}_") or email.startswith(f"tg_{tg_id}_"):
+                    marzban_username = email.rstrip("-wl")
                     _found_orphan = True
                     break
             if _found_orphan:
@@ -454,6 +463,12 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
                         referrer.expire_date += timedelta(days=bonus_days)
                     else:
                         referrer.expire_date = ref_now + timedelta(days=bonus_days)
+                    # Обновляем expire_premium (бонус даётся к VIP/БС тарифу)
+                    if referrer.expire_premium and referrer.expire_premium > ref_now:
+                        referrer.expire_premium += timedelta(days=bonus_days)
+                    else:
+                        referrer.expire_premium = ref_now + timedelta(days=bonus_days)
+                    referrer.recalculate_expire_date()
                     if referrer.marzban_username:
                         try:
                             await marzban_service.extend_user_expiry_light(referrer.marzban_username, bonus_days)
@@ -475,6 +490,42 @@ async def _process_subscription_payment(session, bot, user, invoice, amount, day
             current_referrer_id = referrer.referrer_id
     except Exception as e:
         logger.error(f"Ошибка реферальных: {e}")
+
+    # Начисление бонуса за подписку на канал (+3 дня)
+    if not user.channel_bonus_given and user.task_channel_sub:
+        try:
+            bonus_days = 3
+            _now = datetime.utcnow()
+            if user.expire_date and user.expire_date > _now:
+                user.expire_date += timedelta(days=bonus_days)
+            else:
+                user.expire_date = _now + timedelta(days=bonus_days)
+            if user.expire_premium and user.expire_premium > _now:
+                user.expire_premium += timedelta(days=bonus_days)
+            elif tier == "premium":
+                user.expire_premium = (_now + timedelta(days=days)) + timedelta(days=bonus_days)
+            if user.expire_standard and user.expire_standard > _now:
+                user.expire_standard += timedelta(days=bonus_days)
+            elif tier == "standard":
+                user.expire_standard = (_now + timedelta(days=days)) + timedelta(days=bonus_days)
+            user.recalculate_expire_date()
+            user.channel_bonus_given = True
+            await session.commit()
+            if user.marzban_username:
+                try:
+                    await marzban_service.extend_user_expiry_light(user.marzban_username, bonus_days)
+                except Exception:
+                    pass
+            try:
+                await bot.send_message(user_telegram_id,
+                    "🎁 <b>Бонус +3 дня за подписку на канал!</b>\n\n"
+                    "Спасибо за подписку! Бонус начислен на ваш тариф.",
+                    parse_mode="HTML")
+            except Exception:
+                pass
+            logger.info(f"Канальный бонус +3 дня начислен для {user_telegram_id}")
+        except Exception as e:
+            logger.error(f"Ошибка начисления канального бонуса для {user_telegram_id}: {e}")
 
     await session.commit()
 

@@ -268,7 +268,11 @@ async def activate_trial(callback: types.CallbackQuery, session: AsyncSession):
 
         user.marzban_username = marzban_data.get("username")
         user.is_trial_used = True
-        user.expire_date = datetime.utcnow() + timedelta(hours=int(trial_hours))
+        # Устанавливаем раздельные сроки триала
+        _trial_expiry = datetime.utcnow() + timedelta(hours=int(trial_hours))
+        user.expire_standard = _trial_expiry
+        user.expire_premium = _trial_expiry
+        user.expire_date = _trial_expiry
         await session.commit()
 
         # Получаем ссылку на подписку из sub-service
