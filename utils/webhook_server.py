@@ -22,6 +22,7 @@ from config import settings
 # Импорты обработчиков
 from services.crypto_webhook import handle_crypto_webhook_update
 from services.platega_webhook import handle_platega_webhook_update
+from handlers.admin.notifications import notify_admin_payment
 from services.xui_api import xui_service as marzban_service
 from services.payment_crypto import crypto_bot_service
 
@@ -791,6 +792,17 @@ class WebhookHandler:
             except Exception as e:
                 logger.error(f"Ошибка уведомления админов: {e}")
 
+            # Уведомление админов через notify_admin_payment
+            try:
+                await notify_admin_payment(
+                    self.bot, tg_id, amount,
+                    username=user.username,
+                    method="Внутренний баланс",
+                    referrers_bonuses=None,
+                )
+            except Exception as e:
+                logger.error(f"Ошибка notify_admin_payment (balance): {e}")
+
             return web.json_response({"status": "success", "message": "Оплата прошла успешно"})
             
         except Exception as e:
@@ -1275,6 +1287,17 @@ class WebhookHandler:
             except Exception as e:
                 logger.error(f"Ошибка уведомления админов: {e}")
 
+            # Уведомление админов через notify_admin_payment
+            try:
+                await notify_admin_payment(
+                    self.bot, tg_id, amount,
+                    username=user.username,
+                    method="Реферальный баланс",
+                    referrers_bonuses=referrers_bonuses if referrers_bonuses else None,
+                )
+            except Exception as e:
+                logger.error(f"Ошибка notify_admin_payment (referral): {e}")
+
             return web.json_response({"status": "success", "message": "Оплата прошла успешно"})
 
         except Exception as e:
@@ -1374,6 +1397,17 @@ class WebhookHandler:
                 except Exception as e:
                     logger.error(f"Referrer bonus error (traffic): {e}")
                 
+                # Уведомление админов через notify_admin_payment
+                try:
+                    await notify_admin_payment(
+                        self.bot, tg_id, price,
+                        username=user.username,
+                        method="Реферальный баланс (трафик)",
+                        referrers_bonuses=None,
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка notify_admin_payment (traffic referral): {e}")
+                
                 return web.json_response({"status": "success", "gb": gb, "new_limit": new_limit_gb})
         except Exception as e:
             logger.error(f"API Buy Traffic Referral Error: {e}")
@@ -1452,6 +1486,17 @@ class WebhookHandler:
                             await ref_session.commit()
                 except Exception as e:
                     logger.error(f"Referrer bonus error (gift): {e}")
+                
+                # Уведомление админов через notify_admin_payment
+                try:
+                    await notify_admin_payment(
+                        self.bot, tg_id, amount,
+                        username=user.username,
+                        method="Реферальный баланс (подарок)",
+                        referrers_bonuses=None,
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка notify_admin_payment (gift referral): {e}")
                 
                 return web.json_response({"status": "success", "gift_link": gift_link, "code": code})
         except Exception as e:

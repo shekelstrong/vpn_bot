@@ -1,14 +1,15 @@
 """
-Планировщик уведомлений для бота Nemo VPN.
+Планировщик уведомлений для бота NEMO VPN.
 
 ИЗМЕНЕНИЯ:
-1. Добавлена задача check_tier_expiry — каждый час проверяет раздельные сроки (expire_standard, expire_premium)
-2. Если у пользователя истёк один из тарифов — убирает inbound из Marzban и отправляет уведомление
+1. Добавлена задача check_tier_expiry — каждый час проверяет раздельные сроки
+2. При истечении тарифа — disable клиента в 3x-ui (не Marzban inbound update)
 3. Ссылка подписки остаётся той же, но истёкший ключ пропадает при обновлении в Happ
-4. Все уведомления упоминают Happ (не V2Box)
+4. Синхронизация курса USDT→RUB каждые 30 минут
 """
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import List, Tuple
 from sqlalchemy import select, and_, or_
@@ -220,10 +221,10 @@ class NotificationScheduler:
     async def _check_tier_expiry(self):
         """
         Каждый час проверяем expire_standard и expire_premium.
-        Если один из тарифов истёк — обновляем inbound-ы в Marzban
+        Если один из тарифов истёк — disable клиента в 3x-ui
         и отправляем уведомление пользователю.
         """
-        from services.xui_api import xui_service as marzban_service
+        from services.xui_api import xui_service
         
         async with self.db_session_factory() as session:
             try:
@@ -255,7 +256,7 @@ class NotificationScheduler:
                 users = result.scalars().all()
                 
                 for user in users:
-                    await self._process_tier_expiry(session, user, now, marzban_service)
+                    await self._process_tier_expiry(session, user, now, xui_service)
                 
                 if users:
                     logger.info(f"Обработано {len(users)} пользователей с истёкшими тарифами")
@@ -263,44 +264,50 @@ class NotificationScheduler:
             except Exception as e:
                 logger.error(f"Ошибка проверки раздельных тарифов: {e}")
     
-    async def _process_tier_expiry(self, session, user, now, marzban_service):
-        """Обработать истечение конкретного тарифа у пользователя."""
+    async def _process_tier_expiry(self, session, user, now, xui_service):
+        """Обработать истечение конкретного тарифа у пользователя.
+        В 3x-ui: disable клиента в истёкшем inbound'е."""
         try:
-            # Определяем какие inbound-ы ещё активны
-            active_inbounds = []
             standard_expired = False
             premium_expired = False
             
-            if user.expire_standard and user.expire_standard > now:
-                active_inbounds.append("vless-reality-standard")
-            elif user.expire_standard and user.expire_standard <= now:
+            if user.expire_standard and user.expire_standard <= now:
                 standard_expired = True
-            
-            if user.expire_premium and user.expire_premium > now:
-                active_inbounds.append("vless-reality-whitelist")
-            elif user.expire_premium and user.expire_premium <= now:
+            if user.expire_premium and user.expire_premium <= now:
                 premium_expired = True
             
+            # Если ничего не истекло — пропускаем
+            if not standard_expired and not premium_expired:
+                return
+            
             # Если оба тарифа истекли — не трогаем, это обработает _check_expired_users
-            if not active_inbounds:
+            if standard_expired and premium_expired:
                 return
             
-            # Обновляем Marzban: оставляем только активные inbound-ы
-            marzban_data = await marzban_service.get_user(user.marzban_username)
-            if not marzban_data:
-                return
+            client_email = user.marzban_username
             
-            current_inbounds = marzban_data.get("inbounds", {}).get("vless", [])
+            # Disable клиента в истёкшем inbound'е
+            if standard_expired:
+                ib1 = await xui_service._get_inbound(1)
+                settings1 = json.loads(ib1["settings"])
+                client_std = xui_service._find_client_by_email(settings1["clients"], client_email)
+                if client_std and client_std.get("enable", True):
+                    client_std["enable"] = False
+                    ib1["settings"] = json.dumps(settings1)
+                    await xui_service._update_inbound_safe(1, ib1)
+                    logger.info(f"3x-ui: disabled Standard для {client_email}")
             
-            # Если inbound-ы уже правильные — пропускаем
-            if set(current_inbounds) == set(active_inbounds):
-                return
+            if premium_expired:
+                ib2 = await xui_service._get_inbound(2)
+                settings2 = json.loads(ib2["settings"])
+                client_wl = xui_service._find_client_by_email(settings2["clients"], f"{client_email}-wl")
+                if client_wl and client_wl.get("enable", True):
+                    client_wl["enable"] = False
+                    ib2["settings"] = json.dumps(settings2)
+                    await xui_service._update_inbound_safe(2, ib2)
+                    logger.info(f"3x-ui: disabled Premium/БС для {client_email}-wl")
             
-            # Обновляем inbound-ы
-            await marzban_service.update_user_inbounds(user.marzban_username, active_inbounds)
-            logger.info(f"3x-ui: обновлены inbound-ы для {user.marzban_username} → {active_inbounds}")
-            
-            # Обновляем tier пользователя на основе активных подписок
+            # Обновляем tier пользователя
             if premium_expired and not standard_expired:
                 user.tier = "standard"
                 logger.info(f"Tier пользователя {user.user_id} изменён на 'standard' (VIP истёк)")
@@ -308,7 +315,6 @@ class NotificationScheduler:
                 user.tier = "premium"
                 logger.info(f"Tier пользователя {user.user_id} изменён на 'premium' (стандарт истёк)")
 
-            # Пересчитываем expire_date
             user.recalculate_expire_date()
             await session.commit()
             
