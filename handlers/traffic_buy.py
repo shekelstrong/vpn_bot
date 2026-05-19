@@ -68,7 +68,7 @@ async def show_traffic_buy(callback_or_message: types.CallbackQuery | types.Mess
         await message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
 
 
-@router.callback_query(F.data.startswith("traffic_") and ~F.data.startswith("traffic_pay"))
+@router.callback_query(F.data.startswith("traffic_") & ~F.data.startswith("traffic_pay") & ~F.data.startswith("traffic_buy"))
 async def select_traffic_package(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     """Выбор пакета ГБ → показ способов оплаты."""
     gb = int(callback.data.replace("traffic_", ""))
