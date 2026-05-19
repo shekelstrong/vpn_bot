@@ -420,45 +420,41 @@ async def show_subscription(callback_or_message, session: AsyncSession):
     has_subscription = user.expire_date and user.expire_date > datetime.utcnow()
 
     if has_subscription:
+        # Убедимся что у пользователя есть email в 3x-ui
         if not user.marzban_username:
-            try:
-                marzban_data = await marzban_service.create_user(
-                    tg_id=user_id,
-                    username=user.username,
-                    expire_days=30,
-                    data_limit_gb=0.0,
-                )
-                user.marzban_username = marzban_data.get("username")
-                await session.commit()
-            except Exception as e:
-                logger.error(f"Ошибка создания аккаунта Marzban для {user_id}: {e}")
-                await message.answer(
-                    "❌ Ошибка создания VPN-аккаунта. Обратитесь в поддержку."
-                )
-                return
+            user.marzban_username = f"tg_{user_id}"
+            await session.commit()
 
         try:
+            # Получаем данные из 3x-ui
             marzban_data = await marzban_service.get_user(user.marzban_username)
+
             if not marzban_data:
+                # Клиента нет в 3x-ui — создаём
+                now = datetime.utcnow()
+                # Определяем оставшиеся дни
+                days_left = max(1, (user.expire_date - now).days) if user.expire_date else 30
+                # Определяем data_limit из базы
+                gb_limit = (user.gb_limit or 0)
+
                 marzban_data = await marzban_service.create_user(
                     tg_id=user_id,
                     username=user.username,
-                    expire_days=30,
-                    data_limit_gb=0.0,
+                    expire_days=days_left,
+                    data_limit_gb=gb_limit,
                 )
-                user.marzban_username = marzban_data.get("username")
+                user.marzban_username = marzban_data.get("username", f"tg_{user_id}")
                 await session.commit()
 
-            subscription_url = marzban_data.get("subscription_url", "")
-            if subscription_url and subscription_url.startswith("/"):
-                subscription_url = (
-                    f"{settings.MARZBAN_URL.rstrip('/')}{subscription_url}"
-                )
+            # Получаем ссылку на подписку через sub-service
+            subscription_url = await marzban_service.get_user_subscription(user.marzban_username)
 
-            links = marzban_data.get("links", [])
-            vless_link = links[0] if links else ""
+            # Fallback: прямая VLESS-ссылка
+            if not subscription_url:
+                subscription_url = await marzban_service.get_user_vless_link(user.marzban_username)
 
-            if subscription_url or vless_link:
+            if subscription_url:
+                vless_link = await marzban_service.get_user_vless_link(user.marzban_username)
                 await send_subscription_info(
                     message, subscription_url, vless_link, user
                 )
