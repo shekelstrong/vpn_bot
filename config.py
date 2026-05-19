@@ -24,10 +24,34 @@ class Settings(BaseSettings):
     CHANNEL_USERNAME: str = Field(default="@your_channel", description="Telegram канал")
     CHANNEL_CHAT_ID: str = Field(default="-1000000000000", description="Chat ID канала")
 
-    # Marzban API
-    MARZBAN_URL: str = Field(default="https://your-marzban-url.com", description="URL Marzban панели")
-    MARZBAN_ADMIN_USERNAME: str = Field(..., description="Логин администратора Marzban")
-    MARZBAN_ADMIN_PASSWORD: str = Field(..., description="Пароль администратора Marzban")
+    # 3x-ui API (замена Marzban)
+    XUI_API_URL: str = Field(
+        default="https://panel.nemovpn.online:2053",
+        description="URL панели 3x-ui (без /panel/api)"
+    )
+    XUI_USERNAME: str = Field(default="nedopekin", description="Логин 3x-ui")
+    XUI_PASSWORD: str = Field(default="", description="Пароль 3x-ui")
+    XUI_HOST: str = Field(default="81.26.180.40", description="IP 3x-ui сервера")
+    XUI_PORT_STANDARD: int = Field(default=8443, description="Порт Standard inbound")
+    XUI_PORT_PREMIUM: int = Field(default=2083, description="Порт Premium inbound")
+    XUI_SNI_STANDARD: str = Field(default="www.microsoft.com", description="SNI Standard")
+    XUI_SNI_PREMIUM: str = Field(default="www.yandex.ru", description="SNI Premium")
+    XUI_PBK_STANDARD: str = Field(
+        default="O1iyQMVfn3K6Yp1Ctoo5vuvkt4H0qaSxHAVglCXud2M",
+        description="Публичный ключ Reality Standard"
+    )
+    XUI_PBK_PREMIUM: str = Field(
+        default="O1iyQMVfn3K6Yp1Ctoo5vuvkt4H0qaSxHAVglCXud2M",
+        description="Публичный ключ Reality Premium"
+    )
+    XUI_SID_STANDARD: str = Field(default="6c6992c8", description="Short ID Standard")
+    XUI_SID_PREMIUM: str = Field(default="5a3b7f1d", description="Short ID Premium")
+    SUB_PATH: str = Field(default="e83f38f3d13ccd6a", description="Путь subscription service")
+
+    # Marzban API (устаревшее, для совместимости)
+    MARZBAN_URL: str = Field(default="https://your-marzban-url.com", description="URL Marzban панели (deprecated)")
+    MARZBAN_ADMIN_USERNAME: str = Field(..., description="Логин администратора Marzban (deprecated)")
+    MARZBAN_ADMIN_PASSWORD: str = Field(..., description="Пароль администратора Marzban (deprecated)")
 
     # Database
     DATABASE_URL: str = Field(
