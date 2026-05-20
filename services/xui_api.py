@@ -716,14 +716,22 @@ class XUIService:
         return await self.get_user(client_email)
 
     async def get_user_subscription(self, client_email: str) -> str:
-        """Получить ссылку на подписку (sub-service URL)."""
+        """Получить ссылку на подписку (nemo-sub URL с VLESS + routing)."""
         user = await self.get_user(client_email)
         if not user or not user.get("subId"):
             return ""
-        return f"https://sub.nemovpn.online/{settings.SUB_PATH}/{user['subId']}"
+        # nemo-sub endpoint: /sub/{subId} — возвращает оба профиля (Standard + Premium) + routing
+        return f"https://sub.nemovpn.online/sub/{user['subId']}"
+
+    async def get_user_happ_routing_url(self, client_email: str, profile: str = "standard") -> str:
+        """Получить ссылку на Happ routing (для добавления правил маршрутизации)."""
+        user = await self.get_user(client_email)
+        if not user or not user.get("subId"):
+            return ""
+        return f"https://sub.nemovpn.online/happ/{profile}"
 
     async def get_user_vless_link(self, client_email: str) -> str:
-        """Получить прямую VLESS-ссылку (для совместимости)."""
+        """Получить прямую VLESS-ссылку Standard (для совместимости и QR)."""
         user = await self.get_user(client_email)
         if not user or not user.get("id"):
             return ""

@@ -267,7 +267,9 @@ class WebhookHandler:
                 user.marzban_username = new_acc.get('username')
                 await session.commit()
 
-                sub_url = new_acc.get("subscription_url", "")
+                sub_url = await marzban_service.get_user_subscription(new_acc.get("username", ""))
+                if not sub_url:
+                    sub_url = new_acc.get("subscription_url", "")
                 if sub_url and sub_url.startswith("/"):
                     sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{sub_url}"
 

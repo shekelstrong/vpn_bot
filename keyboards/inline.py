@@ -114,8 +114,11 @@ def get_admin_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="Пользователи 👥", callback_data="admin_users", style="primary")
     builder.button(text="Рассылка 📢", callback_data="admin_broadcast", style="primary")
     builder.button(text="Настройки ⚙️", callback_data="settings", style="primary")
+    builder.button(text="🔗 3x-ui Панель", url="https://panel.nemovpn.online:2053", style="primary")
+    builder.button(text="🔄 Миграция пользователей", callback_data="admin_migrate_users", style="primary")
+    builder.button(text="📋 Проверить подписки", callback_data="admin_check_subs", style="primary")
     builder.button(text="Закрыть панель 🔒", callback_data="admin_close", style="danger")
-    builder.adjust(2, 2, 1)
+    builder.adjust(2, 2, 1, 1, 1, 1)
     return builder.as_markup()
 
 

@@ -691,6 +691,143 @@ async def admin_close(callback: types.CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "admin_migrate_users")
+async def admin_migrate_users(callback: types.CallbackQuery, session: AsyncSession):
+    """Массовая миграция старых Marzban-пользователей в новую систему 3x-ui + nemo-sub."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await callback.answer("⏳ Запуск миграции...")
+    
+    from services.xui_api import xui_service as marzban_service
+    
+    result = await session.execute(select(User))
+    users = result.scalars().all()
+    
+    migrated = 0
+    skipped = 0
+    errors = 0
+    
+    for user in users:
+        if not user.marzban_username:
+            continue
+        
+        try:
+            mz = await marzban_service.get_user(user.marzban_username)
+            if not mz:
+                # Пользователь есть в БД но нет в 3x-ui — создаём
+                now = datetime.utcnow()
+                days_left = 0
+                if user.expire_date and user.expire_date > now:
+                    days_left = max(1, (user.expire_date - now).days)
+                
+                if days_left > 0:
+                    gb_limit = user.gb_limit or 0
+                    new_acc = await marzban_service.create_user(
+                        tg_id=user.user_id,
+                        username=user.username,
+                        expire_days=days_left,
+                        data_limit_gb=gb_limit,
+                        tier=user.tier or "standard",
+                        device_count=user.device_count or 1,
+                    )
+                    user.marzban_username = new_acc.get("username", user.marzban_username)
+                    migrated += 1
+                else:
+                    skipped += 1
+            else:
+                # Пользователь есть в 3x-ui — обновляем subId если нужно
+                sub_id = mz.get("subId")
+                if not sub_id:
+                    # Пересоздаём subId через revoke
+                    await marzban_service.revoke_user_subscription(user.marzban_username)
+                    migrated += 1
+                else:
+                    skipped += 1
+        except Exception as e:
+            logger.error(f"Ошибка миграции {user.user_id}: {e}")
+            errors += 1
+    
+    await session.commit()
+    
+    text = (
+        f"🔄 <b>Миграция завершена</b>\n\n"
+        f"✅ Обновлено/создано: {migrated}\n"
+        f"⏭ Пропущено (OK): {skipped}\n"
+        f"❌ Ошибок: {errors}\n\n"
+        f"<i>Все пользователи теперь имеют актуальные ссылки на подписку через nemo-sub.</i>"
+    )
+    
+    await callback.message.edit_text(text=text, reply_markup=get_admin_keyboard())
+    logger.info(f"Админ {callback.from_user.id} выполнил миграцию: migrated={migrated}, skipped={skipped}, errors={errors}")
+
+
+@router.callback_query(F.data == "admin_check_subs")
+async def admin_check_subs(callback: types.CallbackQuery, session: AsyncSession):
+    """Проверить состояние всех активных подписок в 3x-ui."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Нет доступа", show_alert=True)
+        return
+    
+    await callback.answer("⏳ Проверка подписок...")
+    
+    from services.xui_api import xui_service as marzban_service
+    
+    now = datetime.utcnow()
+    result = await session.execute(select(User).where(User.expire_date > now))
+    active_users = result.scalars().all()
+    
+    ok_count = 0
+    missing_count = 0
+    expired_3xui_count = 0
+    
+    issues = []
+    
+    for user in active_users:
+        if not user.marzban_username:
+            missing_count += 1
+            issues.append(f"• ID {user.user_id}: нет marzban_username")
+            continue
+        
+        try:
+            mz = await marzban_service.get_user(user.marzban_username)
+            if not mz:
+                missing_count += 1
+                issues.append(f"• ID {user.user_id}: аккаунт не найден в 3x-ui")
+            else:
+                exp_ts = mz.get("expire") or 0
+                if exp_ts > 0 and exp_ts < int(now.timestamp()):
+                    expired_3xui_count += 1
+                    issues.append(f"• ID {user.user_id}: expired в 3x-ui, но активен в БД")
+                else:
+                    ok_count += 1
+        except Exception as e:
+            issues.append(f"• ID {user.user_id}: ошибка проверки ({str(e)[:30]})")
+    
+    text = (
+        f"📋 <b>Проверка подписок</b>\n\n"
+        f"Всего активных в БД: {len(active_users)}\n"
+        f"✅ OK в 3x-ui: {ok_count}\n"
+        f"❌ Не найдены в 3x-ui: {missing_count}\n"
+        f"⚠️ Expired в 3x-ui: {expired_3xui_count}\n\n"
+    )
+    
+    if issues:
+        text += "<b>Проблемы (первые 20):</b>\n"
+        for issue in issues[:20]:
+            text += issue + "\n"
+        if len(issues) > 20:
+            text += f"<i>...и ещё {len(issues) - 20}</i>\n"
+    else:
+        text += "<b>Все подписки в порядке!</b>\n"
+    
+    text += "\n<i>Если есть проблемы, запустите 🔄 Миграция пользователей.</i>"
+    
+    await callback.message.edit_text(text=text, reply_markup=get_admin_keyboard())
+    logger.info(f"Админ {callback.from_user.id} проверил подписки: ok={ok_count}, missing={missing_count}, expired={expired_3xui_count}")
+
+
 @router.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
     """Отмена текущего действия."""

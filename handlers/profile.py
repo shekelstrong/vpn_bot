@@ -291,9 +291,11 @@ async def regenerate_key(callback: types.CallbackQuery, session: AsyncSession):
         user.marzban_username = new_acc.get("username")
         await session.commit()
 
-        new_sub_url = new_acc.get("subscription_url", "")
-        if new_sub_url and new_sub_url.startswith("/"):
-            new_sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{new_sub_url}"
+        new_sub_url = await marzban_service.get_user_subscription(new_acc.get("username", ""))
+        if not new_sub_url:
+            new_sub_url = new_acc.get("subscription_url", "")
+            if new_sub_url and new_sub_url.startswith("/"):
+                new_sub_url = f"{settings.MARZBAN_URL.rstrip('/')}{new_sub_url}"
 
         await callback.message.edit_text(
             f"🔄 <b>Ключ перегенерирован!</b>\n\n"
@@ -329,13 +331,14 @@ async def get_vless_link(callback: types.CallbackQuery, session: AsyncSession):
             )
             return
 
-        subscription_url = marzban_data.get("subscription_url", "")
-        if subscription_url and subscription_url.startswith("/"):
-            base_url = settings.MARZBAN_URL.rstrip("/")
-            subscription_url = f"{base_url}{subscription_url}"
+        subscription_url = await marzban_service.get_user_subscription(user.marzban_username)
+        if not subscription_url:
+            subscription_url = marzban_data.get("subscription_url", "")
+            if subscription_url and subscription_url.startswith("/"):
+                base_url = settings.MARZBAN_URL.rstrip("/")
+                subscription_url = f"{base_url}{subscription_url}"
 
-        links = marzban_data.get("links", [])
-        vless_link = links[0] if links else ""
+        vless_link = await marzban_service.get_user_vless_link(user.marzban_username)
 
         if subscription_url or vless_link:
             link_text = (

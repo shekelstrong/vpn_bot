@@ -241,7 +241,7 @@ async def notify_user_purchase(
     # Формируем ссылку на подписку через sub-service
     subscription_url = ""
     if sub_id:
-        subscription_url = f"https://sub.nemovpn.online/e83f38f3d13ccd6a/{sub_id}"
+        subscription_url = f"https://sub.nemovpn.online/sub/{sub_id}"
     elif marzban_username:
         try:
             from services.xui_api import xui_service
@@ -249,7 +249,7 @@ async def notify_user_purchase(
             if xui_data:
                 found_sub_id = xui_data.get("subId") or ""
                 if found_sub_id:
-                    subscription_url = f"https://sub.nemovpn.online/e83f38f3d13ccd6a/{found_sub_id}"
+                    subscription_url = f"https://sub.nemovpn.online/sub/{found_sub_id}"
         except Exception as e:
             logger.error(f"Ошибка получения subId для {user_id}: {e}")
 
