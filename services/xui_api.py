@@ -20,9 +20,9 @@ from loguru import logger
 from config import settings
 
 
-# Inbound IDs на nemo-entry
-INBOUND_STANDARD = 1  # port 8443
-INBOUND_PREMIUM = 2   # port 2083
+# Inbound IDs на DE сервере (3x-ui v2.9.4)
+INBOUND_STANDARD = 1  # port 443 (VLESS Reality DE)
+INBOUND_PREMIUM = 2   # port 9999 (VLESS Reality Chain)
 
 
 class XUIService:

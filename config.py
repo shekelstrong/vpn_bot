@@ -24,16 +24,16 @@ class Settings(BaseSettings):
     CHANNEL_USERNAME: str = Field(default="@your_channel", description="Telegram канал")
     CHANNEL_CHAT_ID: str = Field(default="-1000000000000", description="Chat ID канала")
 
-    # 3x-ui API (замена Marzban)
+    # 3x-ui API (замена Marzban) — теперь DE сервер
     XUI_API_URL: str = Field(
-        default="https://panel.nemovpn.online:2053",
-        description="URL панели 3x-ui (без /panel/api)"
+        default="http://108.165.164.85:4531/LpAp7d5rTkYOZaLipZ",
+        description="URL панели 3x-ui DE (с webBasePath)"
     )
     XUI_USERNAME: str = Field(default="nedopekin", description="Логин 3x-ui")
     XUI_PASSWORD: str = Field(default="", description="Пароль 3x-ui")
-    XUI_HOST: str = Field(default="81.26.180.40", description="IP 3x-ui сервера")
-    XUI_PORT_STANDARD: int = Field(default=8443, description="Порт Standard inbound")
-    XUI_PORT_PREMIUM: int = Field(default=2083, description="Порт Premium inbound")
+    XUI_HOST: str = Field(default="108.165.164.85", description="IP 3x-ui DE сервера")
+    XUI_PORT_STANDARD: int = Field(default=443, description="Порт Standard inbound DE")
+    XUI_PORT_PREMIUM: int = Field(default=9999, description="Порт Premium/Chain inbound DE")
     XUI_SNI_STANDARD: str = Field(default="www.yandex.ru", description="SNI Standard")
     XUI_SNI_PREMIUM: str = Field(default="www.yandex.ru", description="SNI Premium")
     XUI_PBK_STANDARD: str = Field(

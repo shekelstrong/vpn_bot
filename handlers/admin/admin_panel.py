@@ -693,7 +693,7 @@ async def admin_close(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "admin_migrate_users")
 async def admin_migrate_users(callback: types.CallbackQuery, session: AsyncSession):
-    """Массовая миграция старых Marzban-пользователей в новую систему 3x-ui + nemo-sub."""
+    """Массовая миграция: синхронизация в 3x-ui DE + бонусы + рассылка уведомлений."""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Нет доступа", show_alert=True)
         return
@@ -702,65 +702,146 @@ async def admin_migrate_users(callback: types.CallbackQuery, session: AsyncSessi
     
     from services.xui_api import xui_service as marzban_service
     
+    now = datetime.utcnow()
     result = await session.execute(select(User))
     users = result.scalars().all()
     
-    migrated = 0
-    skipped = 0
+    created = 0
+    extended_active = 0
+    extended_inactive = 0
     errors = 0
+    notify_active = []
+    notify_trial = []
     
     for user in users:
-        if not user.marzban_username:
-            continue
-        
         try:
-            mz = await marzban_service.get_user(user.marzban_username)
-            if not mz:
-                # Пользователь есть в БД но нет в 3x-ui — создаём
-                now = datetime.utcnow()
-                days_left = 0
-                if user.expire_date and user.expire_date > now:
-                    days_left = max(1, (user.expire_date - now).days)
+            has_subscription = user.expire_date and user.expire_date > now
+            
+            if not user.marzban_username:
+                # Нет аккаунта в 3x-ui — создаём
+                days = 3 if not has_subscription else 7
+                gb_limit = user.gb_limit or (0 if not has_subscription else settings.get_vip_gb_limit(30))
                 
-                if days_left > 0:
-                    gb_limit = user.gb_limit or 0
+                new_acc = await marzban_service.create_user(
+                    tg_id=user.user_id,
+                    username=user.username,
+                    expire_days=days,
+                    data_limit_gb=gb_limit,
+                    tier=user.tier or "standard",
+                    device_count=user.device_count or 1,
+                )
+                user.marzban_username = new_acc.get("username", f"tg_{user.user_id}")
+                user.expire_date = now + timedelta(days=days)
+                user.recalculate_expire_date()
+                created += 1
+                
+                if has_subscription:
+                    notify_active.append(user.user_id)
+                else:
+                    notify_trial.append(user.user_id)
+            else:
+                # Аккаунт есть — проверяем и продлеваем
+                mz = await marzban_service.get_user(user.marzban_username)
+                if not mz:
+                    # Нет в 3x-ui — создаём заново
+                    days = 3 if not has_subscription else 7
+                    gb_limit = user.gb_limit or (0 if not has_subscription else settings.get_vip_gb_limit(30))
+                    
                     new_acc = await marzban_service.create_user(
                         tg_id=user.user_id,
                         username=user.username,
-                        expire_days=days_left,
+                        expire_days=days,
                         data_limit_gb=gb_limit,
                         tier=user.tier or "standard",
                         device_count=user.device_count or 1,
                     )
-                    user.marzban_username = new_acc.get("username", user.marzban_username)
-                    migrated += 1
+                    user.expire_date = now + timedelta(days=days)
+                    user.recalculate_expire_date()
+                    created += 1
                 else:
-                    skipped += 1
-            else:
-                # Пользователь есть в 3x-ui — обновляем subId если нужно
-                sub_id = mz.get("subId")
-                if not sub_id:
-                    # Пересоздаём subId через revoke
-                    await marzban_service.revoke_user_subscription(user.marzban_username)
-                    migrated += 1
-                else:
-                    skipped += 1
+                    # Есть в 3x-ui — продлеваем
+                    if has_subscription:
+                        # +7 дней активным
+                        await marzban_service.extend_user_expiry_light(user.marzban_username, 7)
+                        user.expire_date = (user.expire_date or now) + timedelta(days=7)
+                        user.recalculate_expire_date()
+                        extended_active += 1
+                        notify_active.append(user.user_id)
+                    else:
+                        # +3 дня неактивным (пробные)
+                        await marzban_service.extend_user_expiry_light(user.marzban_username, 3)
+                        user.expire_date = now + timedelta(days=3)
+                        user.recalculate_expire_date()
+                        extended_inactive += 1
+                        notify_trial.append(user.user_id)
+                        
         except Exception as e:
             logger.error(f"Ошибка миграции {user.user_id}: {e}")
             errors += 1
     
     await session.commit()
     
+    # Рассылка уведомлений
+    sent_active = 0
+    sent_trial = 0
+    
+    for user_id in notify_active:
+        try:
+            await callback.bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "🎉 <b>Nemo VPN обновлён!</b>\n\n"
+                    "Мы перешли на новую мощную инфраструктуру с обходом блокировок.\n\n"
+                    "✅ Ваша подписка продлена на <b>+7 дней</b>\n"
+                    "🔗 Обновите подписку в приложении:\n"
+                    f"<code>https://sub.nemovpn.online/sub/{user_id}</code>\n\n"
+                    "Теперь работает:\n"
+                    "• Стандартный VPN (немецкий IP)\n"
+                    "• Обход белых списков (РУ-сайты напрямую)\n\n"
+                    "Спасибо, что остаетесь с нами! 💙"
+                ),
+                parse_mode="HTML",
+            )
+            sent_active += 1
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            logger.warning(f"Не удалось уведомить {user_id}: {e}")
+    
+    for user_id in notify_trial:
+        try:
+            await callback.bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "🎁 <b>Пробный доступ к Nemo VPN!</b>\n\n"
+                    "Мы обновили инфраструктуру и дарим вам <b>3 дня бесплатного доступа</b>.\n\n"
+                    "🔗 Ссылка на подписку:\n"
+                    f"<code>https://sub.nemovpn.online/sub/{user_id}</code>\n\n"
+                    "Доступно:\n"
+                    "• Стандартный VPN (немецкий IP)\n"
+                    "• Обход белых списков (РУ-сайты напрямую)\n\n"
+                    "Попробуйте и оцените качество! 💙"
+                ),
+                parse_mode="HTML",
+            )
+            sent_trial += 1
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            logger.warning(f"Не удалось уведомить {user_id}: {e}")
+    
     text = (
         f"🔄 <b>Миграция завершена</b>\n\n"
-        f"✅ Обновлено/создано: {migrated}\n"
-        f"⏭ Пропущено (OK): {skipped}\n"
+        f"✅ Создано в 3x-ui: {created}\n"
+        f"➕ Продлено активных (+7дн): {extended_active}\n"
+        f"🎁 Продлено пробных (+3дн): {extended_inactive}\n"
         f"❌ Ошибок: {errors}\n\n"
-        f"<i>Все пользователи теперь имеют актуальные ссылки на подписку через nemo-sub.</i>"
+        f"📨 Уведомлений отправлено:\n"
+        f"• Активным: {sent_active}/{len(notify_active)}\n"
+        f"• Пробным: {sent_trial}/{len(notify_trial)}\n\n"
+        f"<i>Все пользователи синхронизированы с DE сервером.</i>"
     )
     
     await callback.message.edit_text(text=text, reply_markup=get_admin_keyboard())
-    logger.info(f"Админ {callback.from_user.id} выполнил миграцию: migrated={migrated}, skipped={skipped}, errors={errors}")
+    logger.info(f"Миграция: created={created}, extended_active={extended_active}, extended_inactive={extended_inactive}, errors={errors}")
 
 
 @router.callback_query(F.data == "admin_check_subs")
