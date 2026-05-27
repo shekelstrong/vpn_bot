@@ -165,8 +165,11 @@ async def on_startup():
     logger.info(f"Зарегистрировано администраторов: {len(settings.admin_ids_list)}")
 
     webapp_url = "https://nemo-vpn-webapp.vercel.app/"
-    await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Nemo VIP", web_app=WebAppInfo(url=webapp_url)))
-    logger.info("Кнопка Mini App установлена")
+    try:
+        await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text="Nemo VPN", web_app=WebAppInfo(url=webapp_url)))
+        logger.info("Кнопка Mini App установлена")
+    except Exception as e:
+        logger.warning(f"Не удалось установить кнопку Mini App: {e}")
 
     base_commands = [
         BotCommand(command="start", description="Главное меню"),
@@ -179,16 +182,25 @@ async def on_startup():
         BotCommand(command="gift", description="Подарить подписку"),
         BotCommand(command="help", description="Помощь"),
     ]
-    await bot.set_my_commands(base_commands, scope=BotCommandScopeAllPrivateChats())
-    logger.info("Общие команды установлены")
+    try:
+        await bot.set_my_commands(base_commands, scope=BotCommandScopeAllPrivateChats())
+        logger.info("Общие команды установлены")
+    except Exception as e:
+        logger.warning(f"Не удалось установить общие команды: {e}")
 
     admin_commands = [BotCommand(command="admin", description="Админ-панель")]
     for admin_id in settings.admin_ids_list:
-        await bot.set_my_commands(base_commands + admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
-    logger.info("Админские команды установлены")
+        try:
+            await bot.set_my_commands(base_commands + admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
+        except Exception as e:
+            logger.warning(f"Не удалось установить команды для админа {admin_id}: {e}")
+    logger.info("Админские команды установлены (при возможности)")
 
-    await update_trial_commands_for_all_users()
-    logger.info("Команды /trial обновлены для всех пользователей")
+    try:
+        await update_trial_commands_for_all_users()
+        logger.info("Команды /trial обновлены для всех пользователей")
+    except Exception as e:
+        logger.warning(f"Не удалось обновить команды разом: {e}")
 
     await run_webhooks(bot)
     logger.info("Вебхук-сервер запущен")
