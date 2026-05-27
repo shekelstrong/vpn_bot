@@ -203,9 +203,7 @@ class CryptoBotService:
     async def get_webhook_info(self) -> Optional[Dict[str, Any]]:
         """Получить информацию о текущем вебхуке."""
         try:
-            response = await self._client.get(f"{self.base_url}/getWebhookInfo", headers=await self._get_headers())
-            response.raise_for_status()
-            result = response.json()
+            result = await self._request("POST", "getWebhookInfo")
             webhook_url = result.get("result", {}).get("url")
             logger.info(f"Текущий URL вебхука: {webhook_url}")
             return result

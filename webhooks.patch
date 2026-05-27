@@ -1,0 +1,18 @@
+--- a/webhooks.py
++++ b/webhooks.py
+@@ -25,6 +25,7 @@ from config import settings
+ from database.engine import get_session_factory, init_db
+ from database.models import User, PaymentInvoice, Transaction
+ from services.xui_api import xui_service as marzban_service
++from services.sub_handler import subscription_handler
+ from services.payment_platega import platega_service
+ from services.payment_crypto import check_webhook_signature
+ from handlers.admin.notifications import notify_admin_payment, notify_referrer_payment
+@@ -532,6 +533,7 @@ async def run_webhooks():
+     app.router.add_post("/platega-webhook", handler.handle_platega_webhook)
+     app.router.add_post("/webhook/platega", handler.handle_platega_webhook)
+     app.router.add_get("/pay_success", handler.handle_pay_success)
++    app.router.add_get("/sub/{path}", subscription_handler.handle_subscription)
+     app.router.add_get("/pay_failed", handler.handle_pay_failed)
+     app.router.add_get("/health", handler.health_check)
+ 
