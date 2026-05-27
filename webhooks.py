@@ -109,6 +109,7 @@ class WebhookHandler:
         raise web.HTTPSeeOther("https://t.me/nemo_vpn_bot")
 
     async def handle_crypto_webhook(self, request: web.Request) -> web.Response:
+        """Обработка webhook от CryptoBot через единый обработчик (поддержка gift/traffic/subscription)."""
         try:
             body_bytes = await request.read()
             body_text = body_bytes.decode("utf-8")
@@ -121,56 +122,17 @@ class WebhookHandler:
             data = await request.json()
             if data.get("update_type") != "invoice_paid":
                 return web.json_response({"status": "ok", "msg": "ignored type"})
-            invoice = data.get("payload", {})
-            order_id_str = invoice.get("payload")
-            invoice_id = invoice.get("invoice_id")
-            if not order_id_str:
-                return web.json_response({"status": "ok"})
+
+            # Используем services.crypto_webhook для правильной обработки ВСЕХ типов платежей
+            from aiogram import Bot
+            from services.crypto_webhook import handle_crypto_webhook_update
+
+            bot = Bot(token=settings.BOT_TOKEN)
             try:
-                order_id = int(order_id_str)
-            except ValueError:
-                return web.json_response({"status": "ok"})
-
-            async with self.session_factory() as session:
-                result = await session.execute(
-                    select(PaymentInvoice).where(PaymentInvoice.id == order_id)
-                )
-                payment_invoice = result.scalar_one_or_none()
-                if not payment_invoice:
-                    return web.json_response({"status": "ok"})
-                if payment_invoice.status == "paid":
-                    return web.json_response({"status": "ok"})
-                payment_invoice.status = "paid"
-                payment_invoice.invoice_id = str(invoice_id)
-                await session.commit()
-                await session.refresh(payment_invoice)
-
-                days = 30
-                tier = "standard"
-                device_count = 1
-                gb_limit = 0
-                if payment_invoice.payload:
-                    try:
-                        payload = json.loads(payment_invoice.payload)
-                        days = payload.get("days", 30)
-                        tier = payload.get("tier", "standard")
-                        device_count = payload.get("device_count", 1)
-                        gb_limit = payload.get("gb_limit", 0)
-                    except:
-                        pass
-
-                await self.process_payment(
-                    tg_user_id=payment_invoice.user_id,
-                    amount=payment_invoice.amount,
-                    currency=payment_invoice.currency,
-                    payment_method="cryptobot",
-                    payment_id=str(invoice_id),
-                    days=days,
-                    tier=tier,
-                    device_count=device_count,
-                    gb_limit=gb_limit,
-                )
-                return web.json_response({"status": "ok"})
+                result = await handle_crypto_webhook_update(data, bot)
+                return web.json_response(result)
+            finally:
+                await bot.session.close()
         except Exception as e:
             logger.error(f"CryptoBot webhook error: {e}")
             return web.json_response({"error": str(e)}, status=500)
