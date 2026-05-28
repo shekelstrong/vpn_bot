@@ -17,6 +17,8 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
             cd /root/projects/vpn_bot
+            git reset --hard HEAD
+            git clean -fd
             git pull origin main
             docker compose build nemo_vpn_bot nemo_vpn_webhooks
             docker compose up -d nemo_vpn_bot nemo_vpn_webhooks
