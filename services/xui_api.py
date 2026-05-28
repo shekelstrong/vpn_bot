@@ -1,9 +1,11 @@
 """
-Сервис для работы с 3x-ui API.
+Сервис для работы с 3x-ui API v3.1.0.
 Замена marzban_api.py — работает напрямую с 3x-ui на nemo-entry.
 
-Ключевые отличия от Marzban:
-- 3x-ui управляет клиентами через inbound update (нет отдельного client CRUD)
+Ключевые отличия от Marzban и от v2.x:
+- Bearer token авторизация через заголовок Authorization
+- Клиенты хранятся в отдельной таблице clients (через /panel/api/clients/*)
+- client_inbounds связывает клиента с inbound'ами
 - Один юзер = один UUID, добавляется в оба inbound'а (Standard + БС)
 - Трафик считается ОТДЕЛЬНО на каждом inbound'е
 - Standard (inbound 1, :8443): безлимит, без totalGB/expiryTime в клиенте
@@ -16,63 +18,32 @@ import json
 import uuid as uuid_mod
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from loguru import logger
+import logging as logger
+# from loguru import logger  # disabled for system python compat
 from config import settings
 
 
-# Inbound IDs на DE сервере (3x-ui v2.9.4)
+# Inbound IDs на DE сервере (3x-ui v3.1.0)
 INBOUND_STANDARD = 1  # port 443 (VLESS Reality DE)
 INBOUND_PREMIUM = 2   # port 9999 (VLESS Reality Chain)
 
 
 class XUIService:
-    """Асинхронный клиент для 3x-ui API."""
+    """Асинхронный клиент для 3x-ui API v3.1.0."""
 
     def __init__(self):
-        self.base_url = settings.XUI_API_URL.rstrip("/")
-        if not self.base_url.endswith("/panel/api"):
-            self.base_url = f"{self.base_url}/panel/api"
-
-        self._session_cookie: Optional[str] = None
-        self._cookie_expires_at: Optional[datetime] = None
+        # webBasePath уже включён в URL
+        self.base_url = "https://panel.nemovpn.online/LpAp7d5rTkYOZaLipZ/panel/api"
+        self._token = "nemo_api_token_2026_v310"
         self._client = httpx.AsyncClient(timeout=30.0, verify=False)
 
-    def _get_cookies(self) -> Dict[str, str]:
-        """Получить куки для авторизации."""
-        if self._session_cookie:
-            return {"3x-ui": self._session_cookie}
-        return {}
-
-    async def _ensure_login(self) -> None:
-        """Проверить/обновить сессию 3x-ui."""
-        if self._session_cookie and self._cookie_expires_at:
-            if datetime.utcnow() < self._cookie_expires_at:
-                return
-
-        login_url = f"{self.base_url.split('/panel/api')[0]}/login"
-        data = {
-            "username": settings.XUI_USERNAME,
-            "password": settings.XUI_PASSWORD,
+    def _get_headers(self) -> Dict[str, str]:
+        """Получить заголовки с Bearer token."""
+        return {
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
         }
-
-        try:
-            response = await self._client.post(
-                login_url, data=data, follow_redirects=True
-            )
-            response.raise_for_status()
-
-            # Извлечь cookie из заголовка
-            set_cookie = response.headers.get("set-cookie", "")
-            if "3x-ui=" in set_cookie:
-                self._session_cookie = set_cookie.split("3x-ui=")[1].split(";")[0]
-                self._cookie_expires_at = datetime.utcnow() + timedelta(hours=23, minutes=59)
-                logger.debug("Успешная авторизация в 3x-ui")
-            else:
-                logger.error("Не удалось получить сессию 3x-ui")
-                raise Exception("Не удалось авторизоваться в 3x-ui")
-        except httpx.HTTPError as e:
-            logger.error(f"Ошибка авторизации 3x-ui: {e}")
-            raise Exception(f"Не удалось авторизоваться в 3x-ui: {e}")
 
     async def _request(
         self,
@@ -83,19 +54,20 @@ class XUIService:
     ) -> Dict[str, Any]:
         """Выполнить запрос к 3x-ui API с ретраями."""
         url = f"{self.base_url}/{endpoint.strip('/')}"
-        cookies = self._get_cookies()
+        headers = self._get_headers()
 
         for attempt in range(retry):
             try:
                 response = await self._client.request(
-                    method=method, url=url, cookies=cookies,
-                    json=json_data, follow_redirects=True,
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    json=json_data,
+                    follow_redirects=True,
                 )
-                if response.status_code == 401 or response.status_code == 302:
-                    self._session_cookie = None
-                    await self._ensure_login()
-                    cookies = self._get_cookies()
-                    continue
+                if response.status_code == 401:
+                    logger.error("3x-ui вернул 401 — проверьте токен")
+                    raise Exception("Ошибка авторизации 3x-ui: неверный токен")
                 response.raise_for_status()
                 result = response.json()
                 if not result.get("success"):
@@ -123,35 +95,34 @@ class XUIService:
         return result["obj"]
 
     async def _add_client(self, inbound_id: int, client_data: Dict[str, Any]) -> bool:
-        """Добавить клиента через /addClient (безопасно, не ломает inbound)."""
-        result = await self._request(
-            "POST", "inbounds/addClient",
-            json_data={"id": inbound_id, "settings": json.dumps({"clients": [client_data]})},
-        )
+        """Добавить клиента через /clients/add с привязкой к inbound."""
+        # В v3.1.0 clients/add принимает clients + client_inbounds
+        payload: Dict[str, Any] = {
+            "clients": [client_data],
+            "clientInbounds": [{"inboundId": inbound_id}],
+        }
+        result = await self._request("POST", "clients/add", json_data=payload)
         success = result.get("success", False)
         if not success:
-            logger.error(f"Ошибка addClient inbound {inbound_id}: {result.get('msg')}")
+            logger.error(f"Ошибка clients/add для inbound {inbound_id}: {result.get('msg')}")
         return success
 
-    async def _del_client(self, inbound_id: int, client_uuid: str) -> bool:
-        """Удалить клиента через /{inbound_id}/delClient/{uuid}."""
-        result = await self._request(
-            "POST", f"inbounds/{inbound_id}/delClient/{client_uuid}"
-        )
+    async def _del_client(self, email: str) -> bool:
+        """Удалить клиента через /clients/del/{email}."""
+        result = await self._request("POST", f"clients/del/{email}")
         success = result.get("success", False)
         if not success:
-            logger.warning(f"Ошибка delClient {client_uuid} from inbound {inbound_id}: {result.get('msg')}")
+            logger.warning(f"Ошибка clients/del/{email}: {result.get('msg')}")
         return success
 
     async def _update_inbound_safe(self, inbound_id: int, inbound_obj: Dict[str, Any]) -> bool:
         """
         Безопасное обновление inbound — ПРОВЕРЯЕТ критические поля перед отправкой.
-        
+
         ⚠️  3x-ui /update/{id} ОПАСЕН: если отправить неполный объект,
         он ПЕРЕЗАПИШЕТ inbound дефолтами (port=0, enable=false, settings=пусто).
         Этот метод проверяет что port > 0, enable=True, settings непустой.
         """
-        # Критические проверки
         port = inbound_obj.get("port", 0)
         enable = inbound_obj.get("enable", False)
         settings_raw = inbound_obj.get("settings", "")
@@ -163,18 +134,54 @@ class XUIService:
         if not enable:
             logger.error(f"БЛОКИРОВКА: попытка обновить inbound {inbound_id} с enable=False!")
             return False
-        if not settings_raw or len(settings_raw) < 10:
+        if not settings_raw or len(str(settings_raw)) < 10:
             logger.error(f"БЛОКИРОВКА: попытка обновить inbound {inbound_id} с пустым settings!")
             return False
         if not remark:
             logger.error(f"БЛОКИРОВКА: попытка обновить inbound {inbound_id} с пустым remark!")
             return False
 
-        result = await self._request("POST", f"inbounds/update/{inbound_id}", json_data=inbound_obj)
+        result = await self._request("PUT", f"inbounds/update/{inbound_id}", json_data=inbound_obj)
         success = result.get("success", False)
         if not success:
             logger.error(f"Ошибка обновления inbound {inbound_id}: {result.get('msg')}")
         return success
+
+    async def _get_client(self, email: str) -> Optional[Dict[str, Any]]:
+        """Получить клиента по email через /clients/get/{email}."""
+        try:
+            result = await self._request("GET", f"clients/get/{email}")
+            if result.get("success"):
+                return result.get("obj")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+        return None
+
+    async def _get_client_list(self) -> List[Dict[str, Any]]:
+        """Получить список всех клиентов через /clients/list."""
+        result = await self._request("GET", "clients/list")
+        if result.get("success"):
+            return result.get("obj", [])
+        return []
+
+    async def _get_client_by_uuid(self, client_uuid: str) -> Optional[Dict[str, Any]]:
+        """Найти клиента по UUID через /clients/list."""
+        clients = await self._get_client_list()
+        for client in clients:
+            if client.get("id") == client_uuid:
+                return client
+        return None
+
+    async def _get_client_traffic(self, email: str) -> int:
+        """Получить использованный трафик клиента (up + down)."""
+        client = await self._get_client(email)
+        if not client:
+            return 0
+        up = client.get("up", 0) or 0
+        down = client.get("down", 0) or 0
+        return up + down
 
     def _find_client_by_email(self, clients: list, email: str) -> Optional[Dict]:
         """Найти клиента в списке по email."""
@@ -202,15 +209,13 @@ class XUIService:
         inbounds: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
-        Создать нового пользователя в 3x-ui (в обоих inbound'ах).
+        Создать нового пользователя в 3x-ui v3.1.0 (в обоих inbound'ах).
 
         Одна подписка = два конфига (Standard + БС).
         UUID одинаковый для обоих inbound'ов.
 
         Возвращает dict с данными созданного клиента.
         """
-        await self._ensure_login()
-
         client_uuid = str(uuid_mod.uuid4())
         client_email = f"tg_{tg_id}"
         # Один subId для обоих inbound'ов (Happ sub-service ищет по subId)
@@ -246,20 +251,20 @@ class XUIService:
             "subId": sub_id,
         }
 
-        # Добавляем клиентов через безопасный /addClient (НЕ ломает inbound)
+        # Добавляем клиентов через /clients/add (с clientInbounds)
         # Если клиент уже существует (Duplicate email) — считаем успехом, не обновляем
         ok1 = await self._add_client(INBOUND_STANDARD, client_std)
         ok2 = await self._add_client(INBOUND_PREMIUM, client_wl)
 
         # Если addClient не удался из-за дубликата email — клиент уже существует
         if not ok1:
-            existing1 = await self._find_client_in_inbound(INBOUND_STANDARD, client_email)
+            existing1 = await self._get_client(client_email)
             ok1 = existing1 is not None
             if existing1:
                 logger.info(f"Клиент {client_email} уже есть в Standard inbound, пропускаем")
 
         if not ok2:
-            existing2 = await self._find_client_in_inbound(INBOUND_PREMIUM, f"{client_email}-wl")
+            existing2 = await self._get_client(f"{client_email}-wl")
             ok2 = existing2 is not None
             if existing2:
                 logger.info(f"Клиент {client_email}-wl уже есть в Premium inbound, пропускаем")
@@ -293,10 +298,8 @@ class XUIService:
     async def get_user(self, client_email: str) -> Optional[Dict[str, Any]]:
         """
         Получить данные пользователя по email.
-        Ищет в обоих inbound'ах, объединяет данные.
+        Ищет через /clients/get/{email}, объединяет данные обоих inbound'ов.
         """
-        await self._ensure_login()
-
         result_data: Dict[str, Any] = {
             "username": client_email,
             "status": "active",
@@ -313,9 +316,7 @@ class XUIService:
 
         # Inbound 1 (Standard)
         try:
-            ib1 = await self._get_inbound(INBOUND_STANDARD)
-            settings1 = json.loads(ib1["settings"])
-            client_std = self._find_client_by_email(settings1["clients"], client_email)
+            client_std = await self._get_client(client_email)
             if client_std:
                 result_data["id"] = client_std.get("id")
                 result_data["subId"] = client_std.get("subId")
@@ -325,9 +326,7 @@ class XUIService:
 
         # Inbound 2 (Premium)
         try:
-            ib2 = await self._get_inbound(INBOUND_PREMIUM)
-            settings2 = json.loads(ib2["settings"])
-            client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
+            client_wl = await self._get_client(f"{client_email}-wl")
             if client_wl:
                 result_data["subId_wl"] = client_wl.get("subId")
                 exp_ms = client_wl.get("expiryTime", 0)
@@ -340,11 +339,11 @@ class XUIService:
         except Exception:
             pass
 
-        # Получаем used_traffic из clientStats (сумма обоих inbound'ов)
+        # Получаем used_traffic из client_traffics (сумма обоих inbound'ов)
         if result_data["id"]:
             try:
-                traffic_std = await self._get_client_traffic(INBOUND_STANDARD, client_email)
-                traffic_wl = await self._get_client_traffic(INBOUND_PREMIUM, f"{client_email}-wl")
+                traffic_std = await self._get_client_traffic(client_email)
+                traffic_wl = await self._get_client_traffic(f"{client_email}-wl")
                 result_data["used_traffic"] = (traffic_std or 0) + (traffic_wl or 0)
             except Exception:
                 pass
@@ -356,21 +355,14 @@ class XUIService:
 
     async def _find_client_in_inbound(self, inbound_id: int, email: str) -> Optional[Dict]:
         """Найти клиента по email в указанном inbound."""
-        await self._ensure_login()
-        ib = await self._get_inbound(inbound_id)
-        settings = json.loads(ib["settings"])
-        return self._find_client_by_email(settings.get("clients", []), email)
-
-    async def _get_client_traffic(self, inbound_id: int, email: str) -> int:
-        """Получить использованный трафик клиента (up + down) из clientStats."""
-        try:
-            ib = await self._get_inbound(inbound_id)
-            for stat in ib.get("clientStats", []):
-                if stat.get("email") == email:
-                    return (stat.get("up", 0) or 0) + (stat.get("down", 0) or 0)
-        except Exception:
-            pass
-        return 0
+        client = await self._get_client(email)
+        if client:
+            # Проверяем связь через client_inbounds (если доступно в объекте)
+            client_inbounds = client.get("clientInbounds", [])
+            for ci in client_inbounds:
+                if ci.get("inboundId") == inbound_id:
+                    return client
+        return None
 
     async def update_user_expiry(
         self,
@@ -382,14 +374,9 @@ class XUIService:
     ) -> Dict[str, Any]:
         """
         Продлить подписку пользователя.
-        Обновляет expiry на Premium inbound'е + добавляет ГБ при продлении.
+        Обновляет expiry на Premium клиенте + добавляет ГБ при продлении.
         """
-        await self._ensure_login()
-
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
-        client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
-
+        client_wl = await self._get_client(f"{client_email}-wl")
         if not client_wl:
             raise ValueError(f"Пользователь {client_email} не найден в Premium inbound")
 
@@ -409,17 +396,14 @@ class XUIService:
         if data_limit_gb > 0:
             current_total_gb = client_wl.get("totalGB", 0) or 0
             if current_total_gb > 0:
-                used_traffic = await self._get_client_traffic(INBOUND_PREMIUM, f"{client_email}-wl")
+                used_traffic = await self._get_client_traffic(f"{client_email}-wl")
                 used_gb = (used_traffic or 0) / (1024**3) if used_traffic else 0
                 client_wl["totalGB"] = int(used_gb + data_limit_gb)
             else:
                 client_wl["totalGB"] = int(data_limit_gb)
 
-        client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
-
-        ib2["settings"] = json.dumps(settings2)
-        ok = await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
-
+        # Обновляем через clients/add (upsert по uuid/email)
+        ok = await self._add_client(INBOUND_PREMIUM, client_wl)
         if not ok:
             raise Exception(f"Не удалось продлить подписку {client_email}")
 
@@ -428,12 +412,7 @@ class XUIService:
 
     async def extend_user_expiry_light(self, client_email: str, extra_days: int) -> Dict[str, Any]:
         """Лёгкое продление: обновляет ТОЛЬКО expiry, не трогает трафик."""
-        await self._ensure_login()
-
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
-        client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
-
+        client_wl = await self._get_client(f"{client_email}-wl")
         if not client_wl:
             raise ValueError(f"Пользователь {client_email} не найден")
 
@@ -446,50 +425,40 @@ class XUIService:
             new_expiry_ms = current_time_ms + (extra_days * 24 * 60 * 60 * 1000)
 
         client_wl["expiryTime"] = new_expiry_ms
-        client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
-        ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
+        ok = await self._add_client(INBOUND_PREMIUM, client_wl)
+        if not ok:
+            raise Exception(f"Не удалось продлить подписку {client_email}")
 
         logger.info(f"Лёгкое продление {client_email}: +{extra_days} дней")
         return await self.get_user(client_email)
 
     async def update_user_ip_limit(self, client_email: str, device_count: int) -> Dict[str, Any]:
         """Обновить лимит устройств на Premium inbound."""
-        await self._ensure_login()
-
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
-        client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
-
+        client_wl = await self._get_client(f"{client_email}-wl")
         if not client_wl:
             raise ValueError(f"Пользователь {client_email} не найден")
 
         client_wl["limitIp"] = device_count
-        client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
-        ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
+        ok = await self._add_client(INBOUND_PREMIUM, client_wl)
+        if not ok:
+            raise Exception(f"Не удалось обновить limitIp {client_email}")
 
         logger.info(f"Обновлен limitIp для {client_email}: {device_count}")
         return await self.get_user(client_email)
 
     async def update_user_data_limit(self, client_email: str, data_limit_gb: float) -> Dict[str, Any]:
         """Обновить лимит трафика на Premium inbound (абсолютное значение)."""
-        await self._ensure_login()
-
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
-        client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
-
+        client_wl = await self._get_client(f"{client_email}-wl")
         if not client_wl:
             raise ValueError(f"Пользователь {client_email} не найден")
 
         client_wl["totalGB"] = int(data_limit_gb) if data_limit_gb > 0 else 0
-        client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
-        ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
+        ok = await self._add_client(INBOUND_PREMIUM, client_wl)
+        if not ok:
+            raise Exception(f"Не удалось обновить лимит трафика {client_email}")
 
         logger.info(f"Обновлен лимит трафика {client_email}: {data_limit_gb} ГБ")
         return await self.get_user(client_email)
@@ -499,22 +468,17 @@ class XUIService:
         Докупка трафика: прибавляет ГБ к текущему лимиту.
         new_total = used_gb + extra_gb.
         """
-        await self._ensure_login()
-
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
-        client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
-
+        client_wl = await self._get_client(f"{client_email}-wl")
         if not client_wl:
             raise ValueError(f"Пользователь {client_email} не найден")
 
-        used_traffic = await self._get_client_traffic(INBOUND_PREMIUM, f"{client_email}-wl")
+        used_traffic = await self._get_client_traffic(f"{client_email}-wl")
         used_gb = (used_traffic or 0) / (1024**3) if used_traffic else 0
         client_wl["totalGB"] = int(used_gb + extra_gb)
-        client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
-        ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
+        ok = await self._add_client(INBOUND_PREMIUM, client_wl)
+        if not ok:
+            raise Exception(f"Не удалось добавить трафик {client_email}")
 
         logger.info(f"Докупка трафика {client_email}: +{extra_gb} ГБ (итого: {client_wl['totalGB']} ГБ)")
         return await self.get_user(client_email)
@@ -529,12 +493,7 @@ class XUIService:
         inbounds: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Обновить пользователя: срок + тариф + устройства + трафик."""
-        await self._ensure_login()
-
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
-        client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
-
+        client_wl = await self._get_client(f"{client_email}-wl")
         if not client_wl:
             raise ValueError(f"Пользователь {client_email} не найден")
 
@@ -554,15 +513,15 @@ class XUIService:
 
         # Обновляем лимит трафика (кумулятивно)
         if data_limit_gb > 0:
-            used_traffic = await self._get_client_traffic(INBOUND_PREMIUM, f"{client_email}-wl")
+            used_traffic = await self._get_client_traffic(f"{client_email}-wl")
             used_gb = (used_traffic or 0) / (1024**3) if used_traffic else 0
             client_wl["totalGB"] = int(used_gb + data_limit_gb)
 
         client_wl["enable"] = True
-        client_wl["updated_at"] = int(datetime.utcnow().timestamp() * 1000)
 
-        ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
+        ok = await self._add_client(INBOUND_PREMIUM, client_wl)
+        if not ok:
+            raise Exception(f"Не удалось обновить пользователя {client_email}")
 
         logger.info(
             f"Полное обновление {client_email}: +{extra_days}д, "
@@ -576,22 +535,16 @@ class XUIService:
         active_inbounds: List[str],
     ) -> Dict[str, Any]:
         """Обновить inbound-ы пользователя (включить/выключить конфиг)."""
-        await self._ensure_login()
-
         has_standard = "vless-reality-standard" in active_inbounds
         has_premium = "vless-reality-whitelist" in active_inbounds
 
         # Находим UUID пользователя
         client_uuid = None
-        ib1 = await self._get_inbound(INBOUND_STANDARD)
-        settings1 = json.loads(ib1["settings"])
-        client_std = self._find_client_by_email(settings1["clients"], client_email)
+        client_std = await self._get_client(client_email)
         if client_std:
             client_uuid = client_std.get("id")
         else:
-            ib2 = await self._get_inbound(INBOUND_PREMIUM)
-            settings2 = json.loads(ib2["settings"])
-            client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
+            client_wl = await self._get_client(f"{client_email}-wl")
             if client_wl:
                 client_uuid = client_wl.get("id")
 
@@ -601,34 +554,26 @@ class XUIService:
         # Управляем Standard inbound
         if not has_standard and client_std:
             # Удаляем из Standard
-            settings1["clients"] = [c for c in settings1["clients"] if c.get("id") != client_uuid]
-            ib1["settings"] = json.dumps(settings1)
-            await self._update_inbound_safe(INBOUND_STANDARD, ib1)
+            await self._del_client(client_email)
         elif has_standard and not client_std:
             # Добавляем обратно в Standard
+            sub_id = client_wl.get("subId") if client_wl else uuid_mod.uuid4().hex[:16]
             client_new_std = {
                 "id": client_uuid,
                 "email": client_email,
                 "flow": "xtls-rprx-vision",
-                "subId": client_wl.get("subId") if client_wl else uuid_mod.uuid4().hex[:16],
-                "created_at": int(datetime.utcnow().timestamp() * 1000),
+                "subId": sub_id,
             }
-            settings1["clients"].append(client_new_std)
-            ib1["settings"] = json.dumps(settings1)
-            await self._update_inbound_safe(INBOUND_STANDARD, ib1)
+            await self._add_client(INBOUND_STANDARD, client_new_std)
 
         # Управляем Premium inbound
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
-        client_wl = self._find_client_by_uuid(settings2["clients"], client_uuid)
-
+        client_wl = await self._get_client(f"{client_email}-wl")
         if not has_premium and client_wl:
             # Удаляем из Premium
-            settings2["clients"] = [c for c in settings2["clients"] if c.get("id") != client_uuid]
-            ib2["settings"] = json.dumps(settings2)
-            await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
+            await self._del_client(f"{client_email}-wl")
         elif has_premium and not client_wl:
             # Добавляем в Premium
+            sub_id = client_std.get("subId") if client_std else uuid_mod.uuid4().hex[:16]
             client_new_wl = {
                 "id": client_uuid,
                 "email": f"{client_email}-wl",
@@ -637,13 +582,9 @@ class XUIService:
                 "limitIp": 0,
                 "totalGB": 0,
                 "expiryTime": 0,
-                "subId": client_std.get("subId") if client_std else uuid_mod.uuid4().hex[:16],
-                "created_at": int(datetime.utcnow().timestamp() * 1000),
-                "updated_at": 0,
+                "subId": sub_id,
             }
-            settings2["clients"].append(client_new_wl)
-            ib2["settings"] = json.dumps(settings2)
-            await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
+            await self._add_client(INBOUND_PREMIUM, client_new_wl)
 
         active = []
         if has_standard:
@@ -655,61 +596,32 @@ class XUIService:
 
     async def delete_user(self, client_email: str) -> None:
         """Удалить пользователя из обоих inbound'ов."""
-        await self._ensure_login()
-
-        # Находим UUID
-        client_uuid = None
-        ib1 = await self._get_inbound(INBOUND_STANDARD)
-        settings1 = json.loads(ib1["settings"])
-        client_std = self._find_client_by_email(settings1["clients"], client_email)
-        if client_std:
-            client_uuid = client_std.get("id")
-            settings1["clients"] = [c for c in settings1["clients"] if c.get("id") != client_uuid]
-            ib1["settings"] = json.dumps(settings1)
-            await self._update_inbound_safe(INBOUND_STANDARD, ib1)
-
-        # Premium inbound
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
-        if client_uuid:
-            settings2["clients"] = [c for c in settings2["clients"] if c.get("id") != client_uuid]
-        else:
-            settings2["clients"] = [c for c in settings2["clients"] if c.get("email") != f"{client_email}-wl"]
-        ib2["settings"] = json.dumps(settings2)
-        await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
-
+        await self._del_client(client_email)
+        await self._del_client(f"{client_email}-wl")
         logger.info(f"Удален пользователь {client_email}")
 
     async def revoke_user_subscription(self, client_email: str) -> Dict[str, Any]:
         """Отозвать подписку: отключить клиента и сгенерировать новый subId."""
-        await self._ensure_login()
-
         new_sub_id = uuid_mod.uuid4().hex[:16]
 
         # Standard: обновляем subId
-        ib1 = await self._get_inbound(INBOUND_STANDARD)
-        settings1 = json.loads(ib1["settings"])
-        client_std = self._find_client_by_email(settings1["clients"], client_email)
+        client_std = await self._get_client(client_email)
         if client_std:
             client_std["subId"] = new_sub_id
-            ib1["settings"] = json.dumps(settings1)
-            await self._update_inbound_safe(INBOUND_STANDARD, ib1)
+            await self._add_client(INBOUND_STANDARD, client_std)
 
         # Premium: обновляем subId
-        ib2 = await self._get_inbound(INBOUND_PREMIUM)
-        settings2 = json.loads(ib2["settings"])
-        client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
+        client_wl = await self._get_client(f"{client_email}-wl")
         if client_wl:
             client_wl["subId"] = new_sub_id
-            ib2["settings"] = json.dumps(settings2)
-            await self._update_inbound_safe(INBOUND_PREMIUM, ib2)
+            await self._add_client(INBOUND_PREMIUM, client_wl)
 
         logger.info(f"Отозвана подписка {client_email} (новые subId)")
         return await self.get_user(client_email)
 
     async def reset_user_traffic(self, client_email: str) -> Dict[str, Any]:
         """Сбросить трафик клиента (сброс счётчиков up/down)."""
-        # В 3x-ui v2 нет прямого API для сброса трафика отдельного клиента.
+        # В 3x-ui v3.1.0 нет прямого API для сброса трафика отдельного клиента.
         # Сброс делается через перезапуск Xray или через панель.
         # Для совместимости — просто логируем.
         logger.warning(f"Сброс трафика {client_email}: не поддерживается напрямую в 3x-ui API")
