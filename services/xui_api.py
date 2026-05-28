@@ -660,7 +660,7 @@ class XUIService:
         Получить данные пользователя по email.
         Ищет в обоих inbound'ах, объединяет данные.
         """
-        await self._ensure_login()
+        await self.login()
 
         result_data: Dict[str, Any] = {
             "username": client_email,
