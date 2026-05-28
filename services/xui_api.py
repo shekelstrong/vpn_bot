@@ -655,6 +655,98 @@ class XUIService:
             f"&type=tcp#NEMO_Standard"
         )
 
+    async def get_user(self, client_email: str) -> Optional[Dict[str, Any]]:
+        """
+        Получить данные пользователя по email.
+        Ищет в обоих inbound'ах, объединяет данные.
+        """
+        await self._ensure_login()
+
+        result_data: Dict[str, Any] = {
+            "username": client_email,
+            "status": "active",
+            "expire": 0,
+            "data_limit": 0,
+            "used_traffic": 0,
+            "inbounds": {"vless": []},
+            "subscription_url": "",
+            "links": [],
+            "id": None,
+            "subId": None,
+            "subId_wl": None,
+        }
+
+        # Inbound 1 (Standard)
+        try:
+            ib1 = await self._get_inbound(INBOUND_STANDARD)
+            settings1 = json.loads(ib1["settings"])
+            client_std = self._find_client_by_email(settings1["clients"], client_email)
+            if client_std:
+                result_data["id"] = client_std.get("id")
+                result_data["subId"] = client_std.get("subId")
+                result_data["inbounds"]["vless"].append("vless-reality-standard")
+        except Exception:
+            pass
+
+        # Inbound 2 (Premium)
+        try:
+            ib2 = await self._get_inbound(INBOUND_PREMIUM)
+            settings2 = json.loads(ib2["settings"])
+            client_wl = self._find_client_by_email(settings2["clients"], f"{client_email}-wl")
+            if client_wl:
+                result_data["subId_wl"] = client_wl.get("subId")
+                exp_ms = client_wl.get("expiryTime", 0)
+                result_data["expire"] = exp_ms // 1000 if exp_ms else 0
+                total_gb = client_wl.get("totalGB", 0)
+                result_data["data_limit"] = total_gb * 1024**3 if total_gb else 0
+                result_data["inbounds"]["vless"].append("vless-reality-whitelist")
+                result_data["limitIp"] = client_wl.get("limitIp", 0)
+                result_data["enable"] = client_wl.get("enable", True)
+        except Exception:
+            pass
+
+        # Получаем used_traffic из clientStats (сумма обоих inbound'ов)
+        if result_data["id"]:
+            try:
+                traffic_std = await self._get_client_traffic(INBOUND_STANDARD, client_email)
+                traffic_wl = await self._get_client_traffic(INBOUND_PREMIUM, f"{client_email}-wl")
+                result_data["used_traffic"] = (traffic_std or 0) + (traffic_wl or 0)
+            except Exception:
+                pass
+
+        if not result_data["id"]:
+            return None
+
+        return result_data
+
+    async def get_user_subscription(self, client_email: str) -> str:
+        """Получить ссылку на подписку (nemo-sub URL с VLESS + routing)."""
+        user = await self.get_user(client_email)
+        if not user or not user.get("subId"):
+            return ""
+        # nemo-sub endpoint: /sub/{subId} — возвращает оба профиля (Standard + Premium) + routing
+        return f"https://sub.nemovpn.online/sub/{user['subId']}"
+
+    async def get_user_happ_routing_url(self, client_email: str, profile: str = "standard") -> str:
+        """Получить ссылку на Happ routing (для добавления правил маршрутизации)."""
+        user = await self.get_user(client_email)
+        if not user or not user.get("subId"):
+            return ""
+        return f"https://sub.nemovpn.online/happ/{profile}"
+
+    async def get_user_vless_link(self, client_email: str) -> str:
+        """Получить прямую VLESS-ссылку Standard (для совместимости и QR)."""
+        user = await self.get_user(client_email)
+        if not user or not user.get("id"):
+            return ""
+        return (
+            f"vless://{user['id']}@{settings.XUI_HOST}:{settings.XUI_PORT_STANDARD}"
+            f"?encryption=none&flow=xtls-rprx-vision&security=reality"
+            f"&sni={settings.XUI_SNI_STANDARD}&fp=chrome"
+            f"&pbk={settings.XUI_PBK_STANDARD}&sid={settings.XUI_SID_STANDARD}"
+            f"&type=tcp#NEMO_Standard"
+        )
+
     async def close(self) -> None:
         """Закрыть HTTP-клиент."""
         await self._client.aclose()
